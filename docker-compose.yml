@@ -25,8 +25,10 @@ services:
   #   docker compose exec containerized_docid_backend flask --app run:app create-db
   #   docker compose exec containerized_docid_backend flask --app run:app db stamp head
   #   docker compose exec containerized_docid_backend flask --app run:app seed-db
-  # (create-db + stamp skips migration data; seed-db fills account_types + resource_types.)
-  # Optional harvest config: docker compose exec containerized_docid_backend python seed_harvest_sources.py
+  #   # or (works even if Flask CLI does not list seed-db yet):
+  #   docker compose exec containerized_docid_backend python seed_reference_data.py
+  # (create-db + stamp skips migration data; seed fills account_types + resource_types.)
+  # Optional harvest: docker compose exec containerized_docid_backend python seed_harvest_sources.py
   containerized_docid_backend:
     build:
       context: ./backend
