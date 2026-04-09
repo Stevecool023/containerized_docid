@@ -48,8 +48,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Always use the production domain for CORDRA
-APPLICATION_DOMAIN = 'https://docid.africapidalliance.org'
+# Same host as APPLICATION_BASE_URL in .env (e.g. docid-demo deployment)
+APPLICATION_DOMAIN = os.getenv("APPLICATION_BASE_URL", "https://docid-demo.africapidalliance.org").rstrip("/")
 
 def fix_file_url(url):
     """Fix file URLs to use the correct domain instead of localhost or any other domain"""
@@ -87,7 +87,7 @@ def push_publication_to_cordra(publication):
         cordra_description = (publication.document_description or "")[:2048]
         metadata = {
             "id": str(publication.id),
-            "docid": f"https://docid.africapidalliance.org/docid/{publication.document_docid}",
+            "docid": f"{APPLICATION_DOMAIN}/docid/{publication.document_docid}",
             "title": publication.document_title,
             "description": cordra_description,
             "doi": publication.doi,

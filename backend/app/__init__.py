@@ -56,7 +56,13 @@ def create_app():
     migrate.init_app(app, db)
     mail.init_app(app)
     # Configure CORS to allow local development
-    CORS(app, origins=["http://localhost:3000", "http://127.0.0.1:3000", "https://docid.africapidalliance.org"])
+    CORS(app, origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "https://docid.africapidalliance.org",
+        "https://docid-demo.africapidalliance.org",
+    ])
     jwt.init_app(app)
     limiter.init_app(app)
     
