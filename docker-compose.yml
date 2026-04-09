@@ -21,10 +21,12 @@ services:
     container_name: containerized_docid_redis
 
 
-  # First-time DB (empty postgres volume): Alembic "upgrade" alone fails — the chain
-  # starts with ALTERs on existing tables. Create schema from models, then stamp head:
+  # First-time DB (empty postgres volume):
   #   docker compose exec containerized_docid_backend flask --app run:app create-db
   #   docker compose exec containerized_docid_backend flask --app run:app db stamp head
+  #   docker compose exec containerized_docid_backend flask --app run:app seed-db
+  # (create-db + stamp skips migration data; seed-db fills account_types + resource_types.)
+  # Optional harvest config: docker compose exec containerized_docid_backend python seed_harvest_sources.py
   containerized_docid_backend:
     build:
       context: ./backend
