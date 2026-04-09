@@ -21,7 +21,8 @@ import {
   ListItem,
   ListItemButton,
   useMediaQuery,
-  Collapse
+  Collapse,
+  Paper
 } from '@mui/material';
 import {
   Person as PersonIcon,
@@ -117,7 +118,7 @@ const Navbar = () => {
 
   // Mobile Menu Content
   const MobileMenuContent = () => (
-    <Box sx={{ width: 280, pt: 2 }}>
+      <Box sx={{ width: 280, pt: 2 }}>
       {/* Mobile Header */}
       <Box sx={{ 
         display: 'flex', 
@@ -127,29 +128,56 @@ const Navbar = () => {
         pb: 2,
         borderBottom: `1px solid ${theme.palette.divider}`
       }}>
-        <Box sx={{ 
-          height: '40px', 
-          width: '120px', 
-          position: 'relative',
-          cursor: 'pointer'
-        }}
-        onClick={() => {
-          router.push('/');
-          handleMobileMenuClose();
-        }}
-        >
-          <Image 
-            src="/assets/images/logo2.png"
-            alt="Logo"
-            width={120}
-            height={40}
-            style={{ 
-              objectFit: 'contain',
-              width: '100%',
-              height: '100%'
-            }}
-            priority
-          />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flex: 1, minWidth: 0 }}>
+          <Box sx={{ 
+            height: '40px', 
+            width: '100px', 
+            position: 'relative',
+            cursor: 'pointer',
+            flexShrink: 0
+          }}
+          onClick={() => {
+            router.push('/');
+            handleMobileMenuClose();
+          }}
+          >
+            <Image 
+              src="/assets/images/logo2.png"
+              alt="DOCiD"
+              width={120}
+              height={40}
+              style={{ 
+                objectFit: 'contain',
+                width: '100%',
+                height: '100%'
+              }}
+              priority
+            />
+          </Box>
+          {isAuthenticated && (
+            <Paper
+              elevation={0}
+              sx={{
+                py: 0.5,
+                px: 1,
+                borderRadius: 1,
+                backgroundColor: 'rgba(255, 255, 255, 0.98)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                maxHeight: 40,
+                maxWidth: 120,
+              }}
+            >
+              <Image
+                src="/assets/images/stellenbosch.png"
+                alt="Stellenbosch University"
+                width={100}
+                height={36}
+                style={{ objectFit: 'contain', width: '100%', height: 'auto', maxHeight: 36 }}
+              />
+            </Paper>
+          )}
         </Box>
         <IconButton onClick={handleMobileMenuClose} size="small">
           <CloseIcon />
@@ -392,34 +420,75 @@ const Navbar = () => {
             </IconButton>
           )}
 
-          {/* Logo Container */}
-          <Box 
-            component="div" 
-            onClick={() => router.push('/')}
-            sx={{ 
-              height: '50px', 
-              width: { xs: '120px', sm: '150px' }, 
-              position: 'relative', 
+          {/* DOCiD logo + client institution logo */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
               marginRight: { xs: 'auto', md: '100px' },
-              transition: 'transform 0.2s ease',
-              cursor: 'pointer',
-              '&:hover': {
-                transform: 'scale(1.02)'
-              }
+              flexShrink: 0,
             }}
           >
-            <Image 
-              src="/assets/images/logo2.png"
-              alt="Logo"
-              width={150}
-              height={50}
-              style={{ 
-                objectFit: 'contain',
-                width: '100%',
-                height: '100%'
+            <Box
+              component="div"
+              onClick={() => router.push('/')}
+              sx={{
+                height: '50px',
+                width: { xs: '120px', sm: '150px' },
+                position: 'relative',
+                transition: 'transform 0.2s ease',
+                cursor: 'pointer',
+                '&:hover': {
+                  transform: 'scale(1.02)',
+                },
               }}
-              priority
-            />
+            >
+              <Image
+                src="/assets/images/logo2.png"
+                alt="DOCiD"
+                width={150}
+                height={50}
+                style={{
+                  objectFit: 'contain',
+                  width: '100%',
+                  height: '100%',
+                }}
+                priority
+              />
+            </Box>
+            {isAuthenticated && (
+              <Paper
+                elevation={0}
+                sx={{
+                  height: 50,
+                  px: 1.5,
+                  py: 0.5,
+                  borderRadius: 1.5,
+                  backgroundColor: 'rgba(255, 255, 255, 0.98)',
+                  border: '1px solid rgba(255, 255, 255, 0.35)',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.12)',
+                  display: { xs: 'none', sm: 'flex' },
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  maxWidth: 200,
+                }}
+                aria-label="Partner institution"
+              >
+                <Image
+                  src="/assets/images/stellenbosch.png"
+                  alt="Stellenbosch University"
+                  width={168}
+                  height={44}
+                  style={{
+                    objectFit: 'contain',
+                    maxHeight: 44,
+                    width: 'auto',
+                    height: 'auto',
+                  }}
+                />
+              </Paper>
+            )}
           </Box>
 
           {/* Desktop Menu Items */}
