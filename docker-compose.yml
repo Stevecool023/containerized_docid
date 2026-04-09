@@ -51,9 +51,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://docid-demo.africapidalliance.org/api/v1}
-        # Required for next build: Next.js inlines server env at build time; runtime env alone is not enough.
-        BACKEND_API_URL: ${BACKEND_API_URL:-http://containerized_docid_backend:5001/api/v1}
+        # Quote defaults: unquoted https:// breaks YAML (colon).
+        NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-https://docid-demo.africapidalliance.org/api/v1}"
+        BACKEND_API_URL: "${BACKEND_API_URL:-http://containerized_docid_backend:5001/api/v1}"
     container_name: containerized_docid_frontend
     # Next.js in Docker does not auto-load frontend/.env.production; inject it here.
     # (Compose only reads repo-root .env for ${VAR} substitution, not this path.)
@@ -63,7 +63,7 @@ services:
       # Overrides env_file: reach backend by service name inside the stack
       BACKEND_API_URL: http://containerized_docid_backend:5001/api/v1
       # Registration/reset links (URL the user's browser can open)
-      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-https://docid-demo.africapidalliance.org}
+      NEXT_PUBLIC_BASE_URL: "${NEXT_PUBLIC_BASE_URL:-https://docid-demo.africapidalliance.org}"
     ports:
       # Host 3001 avoids clash with main stack on 3000; in-container port stays 3000
       - "3001:3000"
