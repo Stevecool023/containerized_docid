@@ -1,0 +1,630 @@
+"""
+DSpace Legacy (6.x and earlier) Integration Service
+
+This module provides integration with DSpace 6.x and earlier versions,
+which use the older REST API structure (/rest/) instead of the newer
+DSpace 7+ REST API (/server/api/).
+
+Key Differences from DSpace 7+:
+- Uses /rest/ endpoints instead of /server/api/
+- Different authentication mechanism (login endpoint)
+- Different response structure
+- Items accessed via /rest/items/{id} instead of UUID
+- Collections and communities have different structure
+"""
+
+import requests
+import hashlib
+import json
+from typing import Optional, Dict, List, Any
+from datetime import datetime
+
+
+class DSpaceLegacyClient:
+    """Client for DSpace 6.x REST API"""
+
+    def __init__(self, base_url: str, email: str = None, password: str = None):
+        """
+        Initialize DSpace Legacy client
+
+        Args:
+            base_url: Base URL of DSpace instance (e.g., https://dspace.example.org)
+            email: User email for authentication
+            password: User password for authentication
+        """
+        self.base_url = base_url.rstrip('/')
+        self.rest_url = f"{self.base_url}/rest"
+        self.email = email
+        self.password = password
+        self.session = requests.Session()
+        self.session.headers.update({
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        })
+        self.token = None
+
+    def authenticate(self) -> bool:
+        """
+        Authenticate with DSpace Legacy API
+
+        DSpace 6.x uses form-data for login and returns token via:
+        - Cookie (JSESSIONID) 
+        - Or response body as plain text
+        
+        Returns:
+            bool: True if authentication successful
+        """
+        if not self.email or not self.password:
+            return False
+
+        try:
+            url = f"{self.rest_url}/login"
+            
+            # DSpace 6.x requires form-data with form content type
+            # Must NOT send Content-Type: application/json for form-data login
+            headers = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            response = self.session.post(url, data={
+                'email': self.email,
+                'password': self.password
+            }, headers=headers)
+
+            if response.status_code == 200:
+                # Token may be in response body or stored in session cookies
+                self.token = response.text.strip() if response.text.strip() else 'session-cookie'
+                
+                # If token is in body, add it to headers for subsequent requests
+                if response.text.strip():
+                    self.session.headers.update({
+                        'rest-dspace-token': self.token
+                    })
+                
+                # Session cookies (JSESSIONID) are automatically handled by requests.Session
+                return True
+            return False
+        except Exception as e:
+            print(f"Authentication error: {e}")
+            return False
+
+    def logout(self) -> bool:
+        """Logout and invalidate token"""
+        if not self.token:
+            return True
+
+        try:
+            url = f"{self.rest_url}/logout"
+            response = self.session.post(url)
+            self.token = None
+            if 'rest-dspace-token' in self.session.headers:
+                del self.session.headers['rest-dspace-token']
+            return response.status_code == 200
+        except Exception as e:
+            print(f"Logout error: {e}")
+            return False
+
+    def test_connection(self) -> bool:
+        """Test connection to DSpace Legacy instance"""
+        try:
+            url = f"{self.rest_url}/status"
+            response = self.session.get(url)
+            return response.status_code == 200
+        except Exception as e:
+            print(f"Connection test failed: {e}")
+            return False
+
+    def get_communities(self, limit: int = 100, offset: int = 0) -> Optional[List[Dict]]:
+        """
+        Get communities from DSpace Legacy
+
+        Args:
+            limit: Number of communities to retrieve
+            offset: Offset for pagination
+
+        Returns:
+            List of community dictionaries or None
+        """
+        try:
+            url = f"{self.rest_url}/communities"
+            params = {
+                'limit': limit,
+                'offset': offset
+            }
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            print(f"Error fetching communities: {e}")
+            return None
+
+    def get_items(self, limit: int = 20, offset: int = 0) -> Optional[List[Dict]]:
+        """
+        Get items from DSpace Legacy
+
+        Args:
+            limit: Number of items to retrieve
+            offset: Offset for pagination
+
+        Returns:
+            List of item dictionaries or None
+        """
+        try:
+            url = f"{self.rest_url}/items"
+            params = {
+                'limit': limit,
+                'offset': offset,
+                'expand': 'metadata,parentCollection,bitstreams'
+            }
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            print(f"Error fetching items: {e}")
+            return None
+
+    def get_item(self, item_id) -> Optional[Dict]:
+        """
+        Get single item by ID or UUID
+
+        Args:
+            item_id: Item numeric ID or UUID string
+
+        Returns:
+            Item dictionary or None
+        """
+        try:
+            url = f"{self.rest_url}/items/{item_id}"
+            params = {'expand': 'metadata,parentCollection,bitstreams'}
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            print(f"Error fetching item {item_id}: {e}")
+            return None
+
+    def find_item_by_handle(self, handle: str) -> Optional[Dict]:
+        """
+        Find item by handle
+
+        Args:
+            handle: Item handle (e.g., "123456789/1")
+
+        Returns:
+            Item dictionary or None
+        """
+        try:
+            url = f"{self.rest_url}/handle/{handle}"
+            params = {'expand': 'metadata,parentCollection,bitstreams'}
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                data = response.json()
+                # Legacy API returns object with 'handle', 'type', 'link'
+                if data.get('type') == 'item':
+                    # Extract item ID from link and fetch full item
+                    item_id = data.get('id')
+                    if item_id:
+                        return self.get_item(item_id)
+            return None
+        except Exception as e:
+            print(f"Error finding item by handle {handle}: {e}")
+            return None
+
+    def get_collections(self, limit: int = 100, offset: int = 0) -> Optional[List[Dict]]:
+        """Get collections from DSpace Legacy"""
+        try:
+            url = f"{self.rest_url}/collections"
+            params = {
+                'limit': limit,
+                'offset': offset,
+                'expand': 'parentCommunity'
+            }
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            print(f"Error fetching collections: {e}")
+            return None
+
+    def get_collection_items(self, collection_id, limit: int = 20, offset: int = 0) -> Optional[List[Dict]]:
+        """Get items from a specific collection"""
+        try:
+            url = f"{self.rest_url}/collections/{collection_id}/items"
+            params = {
+                'limit': limit,
+                'offset': offset,
+                'expand': 'metadata,bitstreams'
+            }
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                return response.json()
+            return None
+        except Exception as e:
+            print(f"Error fetching collection items: {e}")
+            return None
+
+    def search_items(self, query: str, limit: int = 20, offset: int = 0) -> Optional[List[Dict]]:
+        """
+        Search for items
+
+        Args:
+            query: Search query
+            limit: Number of results
+            offset: Offset for pagination
+
+        Returns:
+            List of items or None
+        """
+        try:
+            url = f"{self.rest_url}/filtered-items"
+            params = {
+                'query_field[]': 'title',
+                'query_op[]': 'contains',
+                'query_val[]': query,
+                'limit': limit,
+                'offset': offset,
+                'expand': 'metadata'
+            }
+            response = self.session.get(url, params=params)
+
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('items', [])
+            return None
+        except Exception as e:
+            print(f"Error searching items: {e}")
+            return None
+
+    @staticmethod
+    def calculate_metadata_hash(metadata: List[Dict]) -> str:
+        """
+        Calculate hash of metadata for change detection
+
+        Args:
+            metadata: Metadata list from DSpace Legacy
+
+        Returns:
+            MD5 hash string
+        """
+        metadata_str = json.dumps(metadata, sort_keys=True)
+        return hashlib.md5(metadata_str.encode()).hexdigest()
+
+
+class DSpaceLegacyMetadataMapper:
+    """
+    Maps DSpace Legacy metadata to DOCiD format.
+
+    lastModified Field Across DSpace Versions:
+        DSpace 6.x:   "2015-01-12 15:44:12.978"          (space-separated, no timezone)
+        DSpace 7/8/9: "2017-06-24T00:40:54.970+0000"     (ISO 8601 with timezone)
+
+    The lastModified field is a top-level item property (not inside metadata).
+    DSpace 6.x does NOT support Solr search by lastModified, so re-sync requires
+    fetching items and comparing timestamps locally.
+    """
+
+    @classmethod
+    def dspace_to_docid(cls, dspace_item: Dict, user_id: int) -> Dict:
+        """
+        Transform DSpace Legacy item metadata to DOCiD format
+
+        Args:
+            dspace_item: Item from DSpace Legacy API
+            user_id: DOCiD user ID to assign publication to
+
+        Returns:
+            Dictionary with publication data, creators, and extended metadata
+        """
+        metadata = dspace_item.get('metadata', [])
+
+        # Extract basic fields
+        title = cls._get_metadata_value(metadata, 'dc.title')
+        description = (
+            cls._get_metadata_value(metadata, 'dc.description') or
+            cls._get_metadata_value(metadata, 'dc.description.abstract') or
+            ''
+        )
+        dc_type = cls._get_metadata_value(metadata, 'dc.type')
+        date_issued = cls._get_metadata_value(metadata, 'dc.date.issued')
+
+        # Map DC type to resource type
+        resource_type = cls._map_dc_type_to_resource_type(dc_type)
+
+        # Publication data
+        publication_data = {
+            'user_id': user_id,
+            'document_title': title or 'Untitled',
+            'document_description': description or '',
+            'resource_type': resource_type,
+            'published_date': date_issued,
+        }
+
+        # Extract creators/authors
+        creators = cls._extract_creators(metadata)
+
+        # Extract subjects
+        subjects = cls._get_metadata_values(metadata, 'dc.subject')
+
+        # Extract publisher
+        publisher = cls._get_metadata_value(metadata, 'dc.publisher')
+
+        # Extract organizations
+        organizations = []
+        corporate_contributors = cls._get_metadata_values(metadata, 'dc.contributor.corporate')
+        affiliations = cls._get_metadata_values(metadata, 'dc.contributor.affiliation')
+        organizations.extend(corporate_contributors + affiliations)
+
+        # Extract funders
+        funders = []
+        funder_names = cls._get_metadata_values(metadata, 'dc.contributor.funder')
+        sponsorships = cls._get_metadata_values(metadata, 'dc.description.sponsorship')
+        funders.extend(funder_names + sponsorships)
+
+        # Extract projects
+        projects = []
+        project_names = cls._get_metadata_values(metadata, 'dc.relation.ispartof')
+        project_refs = cls._get_metadata_values(metadata, 'dc.relation.project')
+        projects.extend(project_names + project_refs)
+
+        # Extract lastModified (top-level field, not inside metadata)
+        # DSpace 6.x format: "2015-01-12 15:44:12.978" (space-separated, no timezone)
+        last_modified_raw = dspace_item.get('lastModified')
+        last_modified = cls._parse_last_modified(last_modified_raw)
+
+        # Extended metadata
+        extended_metadata = {
+            'dates': {
+                'issued': cls._get_metadata_value(metadata, 'dc.date.issued'),
+                'accessioned': cls._get_metadata_value(metadata, 'dc.date.accessioned'),
+                'available': cls._get_metadata_value(metadata, 'dc.date.available'),
+                'last_modified': last_modified_raw,
+            },
+            'identifiers': {
+                'uri': cls._get_metadata_value(metadata, 'dc.identifier.uri'),
+                'handle': dspace_item.get('handle'),
+                'item_id': dspace_item.get('id'),
+            },
+            'language': cls._extract_language(metadata),
+            'types': {
+                'dc_type': dc_type,
+                'type': dspace_item.get('type'),
+            },
+            'rights': cls._get_metadata_value(metadata, 'dc.rights'),
+            'citation': cls._get_metadata_value(metadata, 'dc.identifier.citation'),
+        }
+
+        # Extract avatar image URL from bitstreams
+        avatar_url = cls._extract_avatar_url(dspace_item)
+
+        # Extract parent collection name (available via expand=parentCollection)
+        parent_collection = dspace_item.get('parentCollection') or {}
+        collection_name = parent_collection.get('name') if isinstance(parent_collection, dict) else None
+
+        return {
+            'publication': publication_data,
+            'creators': creators,
+            'subjects': subjects,
+            'publisher': publisher,
+            'organizations': organizations,
+            'funders': funders,
+            'projects': projects,
+            'extended_metadata': extended_metadata,
+            'last_modified': last_modified,
+            'avatar_url': avatar_url,
+            'collection_name': collection_name,
+        }
+
+    @staticmethod
+    def _get_metadata_value(metadata: List[Dict], key: str) -> Optional[str]:
+        """
+        Get single metadata value by key
+
+        Args:
+            metadata: List of metadata dictionaries
+            key: Metadata key (e.g., 'dc.title')
+
+        Returns:
+            First value or None
+        """
+        for item in metadata:
+            if item.get('key') == key:
+                return item.get('value')
+        return None
+
+    @staticmethod
+    def _get_metadata_values(metadata: List[Dict], key: str) -> List[str]:
+        """
+        Get all metadata values for a key
+
+        Args:
+            metadata: List of metadata dictionaries
+            key: Metadata key
+
+        Returns:
+            List of values
+        """
+        values = []
+        for item in metadata:
+            if item.get('key') == key:
+                value = item.get('value')
+                if value:
+                    values.append(value)
+        return values
+
+    @classmethod
+    def _extract_avatar_url(cls, dspace_item: Dict) -> Optional[str]:
+        """
+        Extract the best image URL from DSpace bitstreams for use as avatar/poster.
+
+        Priority: preview.jpg > thumbnail.jpg > any image bitstream.
+        Returns a full retrieve URL or None if no image bitstreams exist.
+        """
+        bitstreams = dspace_item.get('bitstreams', [])
+        if not bitstreams:
+            return None
+
+        image_mime_types = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+        preview_bitstream = None
+        thumbnail_bitstream = None
+        original_image_bitstream = None
+
+        for bitstream in bitstreams:
+            mime_type = (bitstream.get('mimeType') or '').lower()
+            bitstream_name = (bitstream.get('name') or '').lower()
+            retrieve_link = bitstream.get('retrieveLink')
+
+            if not retrieve_link or mime_type not in image_mime_types:
+                continue
+
+            if '.preview.' in bitstream_name:
+                preview_bitstream = bitstream
+            elif bitstream_name.endswith(('.jpg', '.jpeg')) and '.preview.' not in bitstream_name and original_image_bitstream is None:
+                # Small thumbnail (e.g., "file.png.jpg")
+                if '.' in bitstream_name.rsplit('.', 1)[0]:
+                    thumbnail_bitstream = bitstream
+                else:
+                    original_image_bitstream = bitstream
+            elif mime_type in image_mime_types and original_image_bitstream is None:
+                original_image_bitstream = bitstream
+
+        # Prefer preview > thumbnail > original
+        chosen_bitstream = preview_bitstream or thumbnail_bitstream or original_image_bitstream
+        if not chosen_bitstream:
+            return None
+
+        # Return the retrieveLink (may be relative like /rest/bitstreams/{uuid}/retrieve)
+        return chosen_bitstream.get('retrieveLink') or None
+
+    @classmethod
+    def _extract_creators(cls, metadata: List[Dict]) -> List[Dict]:
+        """Extract creators/authors from metadata"""
+        creators = []
+
+        # Get authors
+        authors = cls._get_metadata_values(metadata, 'dc.contributor.author')
+        for author in authors:
+            creators.append({
+                'creator_name': author,
+                'creator_role': 'Author',
+                'orcid_id': None,
+                'affiliation': None
+            })
+
+        # Get other contributors
+        contributors = cls._get_metadata_values(metadata, 'dc.contributor')
+        for contributor in contributors:
+            if contributor not in authors:  # Avoid duplicates
+                creators.append({
+                    'creator_name': contributor,
+                    'creator_role': 'Contributor',
+                    'orcid_id': None,
+                    'affiliation': None
+                })
+
+        # Get creators
+        dc_creators = cls._get_metadata_values(metadata, 'dc.creator')
+        for creator in dc_creators:
+            if creator not in authors and creator not in contributors:
+                creators.append({
+                    'creator_name': creator,
+                    'creator_role': 'Creator',
+                    'orcid_id': None,
+                    'affiliation': None
+                })
+
+        return creators
+
+    @classmethod
+    def _extract_language(cls, metadata: List[Dict]) -> str:
+        """Extract language with fallback"""
+        language_iso = cls._get_metadata_value(metadata, 'dc.language.iso')
+        if language_iso:
+            return language_iso
+
+        language = cls._get_metadata_value(metadata, 'dc.language')
+        if language:
+            return language
+
+        return 'en'  # Default to English
+
+    @staticmethod
+    def _parse_last_modified(last_modified_str: Optional[str]) -> Optional[datetime]:
+        """
+        Parse DSpace lastModified timestamp to Python datetime.
+
+        DSpace 6.x format: "2015-01-12 15:44:12.978" (space-separated, no timezone)
+        DSpace 7/8/9 format: "2017-06-24T00:40:54.970+0000" (ISO 8601 with timezone)
+
+        Both formats are handled for forward compatibility if a repository upgrades.
+
+        Args:
+            last_modified_str: Raw lastModified string from DSpace item
+
+        Returns:
+            datetime object or None if parsing fails
+        """
+        if not last_modified_str:
+            return None
+
+        formats = [
+            '%Y-%m-%d %H:%M:%S.%f',      # DSpace 6.x: 2015-01-12 15:44:12.978
+            '%Y-%m-%d %H:%M:%S',          # DSpace 6.x without millis
+            '%Y-%m-%dT%H:%M:%S.%f%z',     # DSpace 7/8/9: 2017-06-24T00:40:54.970+0000
+            '%Y-%m-%dT%H:%M:%S%z',        # DSpace 7/8/9 without millis
+            '%Y-%m-%dT%H:%M:%S.%fZ',      # UTC variant
+            '%Y-%m-%dT%H:%M:%SZ',         # UTC variant without millis
+        ]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(last_modified_str, fmt)
+            except ValueError:
+                continue
+
+        return None
+
+    @staticmethod
+    def _map_dc_type_to_resource_type(dc_type: Optional[str]) -> str:
+        """Map Dublin Core type to DataCite resource type (must match resource_types DB table)"""
+        if not dc_type:
+            return 'Text'
+
+        dc_type_lower = dc_type.lower()
+
+        # Map to DataCite vocabulary matching resource_types DB table
+        type_mapping = {
+            'article': 'Text',
+            'journal article': 'Text',
+            'book': 'Text',
+            'book chapter': 'Text',
+            'conference paper': 'Text',
+            'thesis': 'Text',
+            'dissertation': 'Text',
+            'dataset': 'Dataset',
+            'image': 'Image',
+            'video': 'Audiovisual',
+            'audio': 'Audiovisual',
+            'software': 'Software',
+            'presentation': 'Text',
+            'poster': 'Image',
+            'report': 'Text',
+            'technical report': 'Text',
+            'working paper': 'Text',
+            'preprint': 'Text',
+        }
+
+        for key, value in type_mapping.items():
+            if key in dc_type_lower:
+                return value
+
+        return 'Text'  # Default

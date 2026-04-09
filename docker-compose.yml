@@ -1,0 +1,73 @@
+# DOCiD containerized stack (containerized_docid) — can run beside main DOCiD on the same host using different published ports.
+services:
+  containerized_docid_postgres:
+    image: postgres:15-alpine
+    container_name: containerized_docid_postgres
+    environment:
+      POSTGRES_USER: containerized_docid_admin
+      POSTGRES_PASSWORD: Xkq7zaXVLI
+      POSTGRES_DB: containerized_docid_db
+    volumes:
+      - containerized_docid_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U containerized_docid_admin -d containerized_docid_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  containerized_docid_redis:
+    image: redis:7-alpine
+    container_name: containerized_docid_redis
+
+
+  # First-time DB (empty postgres volume): Alembic "upgrade" alone fails — the chain
+  # starts with ALTERs on existing tables. Create schema from models, then stamp head:
+  #   docker compose exec containerized_docid_backend flask --app run:app create-db
+  #   docker compose exec containerized_docid_backend flask --app run:app db stamp head
+  containerized_docid_backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: containerized_docid_backend
+    env_file:
+      - ./backend/.env
+    environment:
+      # Must match containerized_docid_postgres above (hostname = Compose service name)
+      DATABASE_URL: postgresql://containerized_docid_admin:Xkq7zaXVLI@containerized_docid_postgres:5432/containerized_docid_db
+      CELERY_BROKER_URL: redis://containerized_docid_redis:6379/0
+    ports:
+      # Host 5002 avoids clash with main stack on 5001; in-container port stays 5001
+      - "5002:5001"
+    depends_on:
+      containerized_docid_postgres:
+        condition: service_healthy
+      containerized_docid_redis:
+        condition: service_started
+
+
+  containerized_docid_frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:5002/api/v1}
+    container_name: containerized_docid_frontend
+    # Next.js in Docker does not auto-load frontend/.env.production; inject it here.
+    # (Compose only reads repo-root .env for ${VAR} substitution, not this path.)
+    env_file:
+      - ./frontend/.env.production
+    environment:
+      # Overrides env_file: reach backend by service name inside the stack
+      BACKEND_API_URL: http://containerized_docid_backend:5001/api/v1
+      # Registration/reset links (URL the user's browser can open)
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL:-http://localhost:3001}
+    ports:
+      # Host 3001 avoids clash with main stack on 3000; in-container port stays 3000
+      - "3001:3000"
+    depends_on:
+      - containerized_docid_backend
+
+
+volumes:
+  containerized_docid_postgres_data:

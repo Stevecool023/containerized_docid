@@ -1,0 +1,597 @@
+"""
+DSpace REST API Client Service
+Handles communication with DSpace repositories and metadata transformation
+"""
+
+import requests
+import hashlib
+import json
+from datetime import datetime
+from typing import Dict, List, Optional, Tuple
+
+
+class DSpaceClient:
+    """Client for interacting with DSpace REST API"""
+
+    def __init__(self, base_url: str, username: str = None, password: str = None):
+        """
+        Initialize DSpace client
+
+        Args:
+            base_url: DSpace server base URL (e.g., https://demo.dspace.org/server)
+            username: Optional username for authentication
+            password: Optional password for authentication
+        """
+        self.base_url = base_url.rstrip('/')
+        self.api_url = f"{self.base_url}/api"
+        self.username = username
+        self.password = password
+        self.session = requests.Session()
+        self.auth_token = None
+        self.csrf_token = None
+
+    def authenticate(self) -> bool:
+        """
+        Authenticate with DSpace and get JWT token
+
+        Returns:
+            True if authentication successful, False otherwise
+        """
+        if not self.username or not self.password:
+            return False
+
+        try:
+            # Step 1: Get CSRF token
+            status_response = self.session.get(f"{self.api_url}/authn/status")
+            self.csrf_token = status_response.headers.get('DSPACE-XSRF-TOKEN')
+
+            if not self.csrf_token:
+                print("Failed to get CSRF token")
+                return False
+
+            # Step 2: Login
+            headers = {'X-XSRF-TOKEN': self.csrf_token}
+            response = self.session.post(
+                f"{self.api_url}/authn/login",
+                data={'user': self.username, 'password': self.password},
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                self.auth_token = response.headers.get('Authorization')
+                new_csrf = response.headers.get('DSPACE-XSRF-TOKEN')
+                if new_csrf:
+                    self.csrf_token = new_csrf
+                return True
+            else:
+                print(f"Login failed: {response.status_code}")
+                return False
+
+        except Exception as e:
+            print(f"Authentication error: {e}")
+            return False
+
+    def _get_headers(self) -> Dict[str, str]:
+        """Get headers for authenticated requests"""
+        headers = {}
+        if self.auth_token:
+            headers['Authorization'] = self.auth_token
+        if self.csrf_token:
+            headers['X-XSRF-TOKEN'] = self.csrf_token
+        return headers
+
+    def get_items(self, page: int = 0, size: int = 20) -> Dict:
+        """
+        Get items from DSpace repository
+
+        Args:
+            page: Page number (0-indexed)
+            size: Number of items per page
+
+        Returns:
+            Dictionary containing items and pagination info
+        """
+        try:
+            url = f"{self.api_url}/core/items?page={page}&size={size}"
+            response = self.session.get(url, headers=self._get_headers())
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get items: {response.status_code}")
+                return {}
+        except Exception as e:
+            print(f"Error getting items: {e}")
+            return {}
+
+    def search_items(self, page: int = 0, size: int = 20, query: str = None) -> Dict:
+        """
+        Search items via /api/discover/search/objects (public, no auth needed).
+        Use this when /api/core/items requires authentication (e.g., UNILAG DSpace 9).
+
+        Args:
+            page: Page number (0-indexed)
+            size: Number of items per page
+            query: Optional search query string
+
+        Returns:
+            Dictionary with 'items' list extracted from nested discover response
+        """
+        try:
+            url = f"{self.api_url}/discover/search/objects"
+            params = {'page': page, 'size': size}
+            if query:
+                params['query'] = query
+
+            response = self.session.get(url, params=params, timeout=30)
+
+            if response.status_code != 200:
+                print(f"Failed to search items: {response.status_code}")
+                return {'_embedded': {'items': []}}
+
+            data = response.json()
+
+            # Extract items from nested discover response structure:
+            # _embedded.searchResult._embedded.objects[]._embedded.indexableObject
+            search_result = data.get('_embedded', {}).get('searchResult', {})
+            search_objects = search_result.get('_embedded', {}).get('objects', [])
+
+            items = []
+            for search_object in search_objects:
+                indexable_object = search_object.get('_embedded', {}).get('indexableObject', {})
+                if indexable_object and indexable_object.get('type') == 'item':
+                    items.append(indexable_object)
+
+            # Return in same format as get_items() for compatibility
+            return {'_embedded': {'items': items}}
+
+        except Exception as search_error:
+            print(f"Error searching items: {search_error}")
+            return {'_embedded': {'items': []}}
+
+    def get_item(self, uuid: str) -> Optional[Dict]:
+        """
+        Get single item by UUID
+
+        Args:
+            uuid: Item UUID
+
+        Returns:
+            Item data or None if not found
+        """
+        try:
+            url = f"{self.api_url}/core/items/{uuid}"
+            response = self.session.get(url, headers=self._get_headers())
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get item {uuid}: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Error getting item {uuid}: {e}")
+            return None
+
+    def get_item_owning_collection(self, uuid: str) -> Optional[Dict]:
+        """
+        Get the owning collection for a DSpace 7+ item.
+        DSpace 7+ exposes this via a separate endpoint, not embedded in the item.
+
+        Args:
+            uuid: Item UUID
+
+        Returns:
+            Collection data dict (with 'name', 'uuid', 'handle') or None
+        """
+        try:
+            url = f"{self.api_url}/core/items/{uuid}/owningCollection"
+            response = self.session.get(url, headers=self._get_headers())
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get owning collection for {uuid}: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Error getting owning collection for {uuid}: {e}")
+            return None
+
+    def get_item_by_handle(self, handle: str) -> Optional[Dict]:
+        """
+        Get item by Handle identifier
+
+        Args:
+            handle: DSpace handle (e.g., "123456789/1")
+
+        Returns:
+            Item data or None if not found
+        """
+        try:
+            # DSpace API allows searching by handle
+            url = f"{self.api_url}/core/items/search/findByHandle?handle={handle}"
+            response = self.session.get(url, headers=self._get_headers())
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get item by handle {handle}: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"Error getting item by handle {handle}: {e}")
+            return None
+
+    def get_communities(self, page: int = 0, size: int = 20) -> Dict:
+        """Get communities from DSpace"""
+        try:
+            url = f"{self.api_url}/core/communities?page={page}&size={size}"
+            response = self.session.get(url, headers=self._get_headers())
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {}
+        except Exception as e:
+            print(f"Error getting communities: {e}")
+            return {}
+
+    def get_collections(self, page: int = 0, size: int = 20) -> Dict:
+        """Get collections from DSpace"""
+        try:
+            url = f"{self.api_url}/core/collections?page={page}&size={size}"
+            response = self.session.get(url, headers=self._get_headers())
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return {}
+        except Exception as e:
+            print(f"Error getting collections: {e}")
+            return {}
+
+    @staticmethod
+    def calculate_metadata_hash(metadata: Dict) -> str:
+        """
+        Calculate MD5 hash of metadata for change detection
+
+        Args:
+            metadata: Metadata dictionary
+
+        Returns:
+            MD5 hash string
+        """
+        # Convert to JSON and hash
+        metadata_str = json.dumps(metadata, sort_keys=True)
+        return hashlib.md5(metadata_str.encode()).hexdigest()
+
+
+class DSpaceMetadataMapper:
+    """
+    Maps DSpace Dublin Core metadata to DOCiD publication format
+
+    lastModified Field Across DSpace Versions:
+        DSpace 6.x:   "2015-01-12 15:44:12.978"          (space-separated, no timezone)
+        DSpace 7/8/9: "2017-06-24T00:40:54.970+0000"     (ISO 8601 with timezone)
+
+    The lastModified field is a top-level item property (not inside metadata).
+    DSpace 7+ also supports Solr-based search by lastModified for incremental sync:
+        /api/discover/search/objects?query=lastModified:[2024-01-01T00:00:00Z TO *]
+    """
+
+    # DSpace type to DOCiD ResourceType mapping
+    TYPE_MAPPING = {
+        'Article': 'Text',
+        'Book': 'Text',
+        'Book chapter': 'Text',
+        'Conference paper': 'Text',
+        'Dataset': 'Dataset',
+        'Image': 'Image',
+        'Software': 'Software',
+        'Thesis': 'Text',
+        'Technical Report': 'Text',
+        'Working Paper': 'Text',
+    }
+
+    @classmethod
+    def dspace_to_docid(cls, dspace_item: Dict, user_id: int, collection_name: str = None) -> Dict:
+        """
+        Transform DSpace item to DOCiD publication format
+
+        Args:
+            dspace_item: DSpace item data
+            user_id: DOCiD user ID who will own the publication
+            collection_name: Optional collection name (fetched separately via owningCollection endpoint)
+
+        Returns:
+            Dictionary ready for Publications model creation
+        """
+        metadata = dspace_item.get('metadata', {})
+
+        # Extract title
+        title = cls._get_metadata_value(metadata, 'dc.title')
+        if not title:
+            title = dspace_item.get('name', 'Untitled')
+
+        # Extract description — prefer dc.description (richer provenance/detail)
+        # over dc.description.abstract (short summary)
+        description = (
+            cls._get_metadata_value(metadata, 'dc.description') or
+            cls._get_metadata_value(metadata, 'dc.description.abstract') or
+            ''
+        )
+
+        # Extract dates
+        date_issued = cls._get_metadata_value(metadata, 'dc.date.issued')
+        date_accessioned = cls._get_metadata_value(metadata, 'dc.date.accessioned')
+        date_available = cls._get_metadata_value(metadata, 'dc.date.available')
+
+        # Extract identifiers
+        identifier_uri = cls._get_metadata_value(metadata, 'dc.identifier.uri')
+
+        # Extract DOI from multiple possible fields (handles UNILAG's dc.identifier.other)
+        extracted_doi = None
+        doi_fields = ['dc.identifier.doi', 'dc.identifier.other', 'dc.identifier']
+        for doi_field in doi_fields:
+            doi_candidates = cls._get_metadata_values(metadata, doi_field)
+            for candidate in doi_candidates:
+                if not candidate:
+                    continue
+                cleaned_candidate = candidate.strip()
+                # Strip common prefixes
+                for prefix in ['doi:', 'DOI:', 'https://doi.org/', 'http://doi.org/', 'https://dx.doi.org/', 'http://dx.doi.org/']:
+                    if cleaned_candidate.startswith(prefix):
+                        cleaned_candidate = cleaned_candidate[len(prefix):].strip()
+                # Strip trailing period
+                cleaned_candidate = cleaned_candidate.rstrip('.')
+                # Validate: DOIs start with 10.
+                if cleaned_candidate.startswith('10.') and '/' in cleaned_candidate:
+                    extracted_doi = cleaned_candidate
+                    break
+            if extracted_doi:
+                break
+
+        # Extract language
+        language = cls._get_metadata_value(metadata, 'dc.language')
+        language_iso = cls._get_metadata_value(metadata, 'dc.language.iso')
+        final_language = language_iso or language or 'en'
+
+        # Extract type
+        dspace_type = cls._get_metadata_value(metadata, 'dc.type', 'Article')
+        dspace_entity_type = cls._get_metadata_value(metadata, 'dspace.entity.type')
+        resource_type = cls.TYPE_MAPPING.get(dspace_type, 'Text')
+
+        # Build publication data
+        publication_data = {
+            'user_id': user_id,
+            'document_title': title,
+            'document_description': description,
+            'published_date': cls._parse_date(date_issued),
+            'resource_type': resource_type,
+            'doi': extracted_doi,
+            'dspace_handle': dspace_item.get('handle'),
+            'dspace_uuid': dspace_item.get('uuid'),
+        }
+
+        # Extract creators
+        creators = cls._extract_creators(metadata)
+
+        # Extract subjects/keywords
+        subjects = cls._get_metadata_values(metadata, 'dc.subject')
+
+        # Extract publisher
+        publisher = cls._get_metadata_value(metadata, 'dc.publisher')
+
+        # Extract author relations
+        author_relations = cls._get_metadata_values(metadata, 'relation.isAuthorOfPublication')
+        author_relations_latest = cls._get_metadata_values(metadata, 'relation.isAuthorOfPublication.latestForDiscovery')
+
+        # Extract organizations (corporate contributors, affiliations)
+        organizations = []
+        corporate_contributors = cls._get_metadata_values(metadata, 'dc.contributor.corporate')
+        organizations.extend(corporate_contributors)
+
+        # Extract affiliations from various possible fields
+        affiliations = cls._get_metadata_values(metadata, 'dc.contributor.affiliation')
+        organizations.extend(affiliations)
+
+        # Extract funders
+        funders = []
+        funder_names = cls._get_metadata_values(metadata, 'dc.contributor.funder')
+        funders.extend(funder_names)
+
+        # Also check sponsorship field
+        sponsorships = cls._get_metadata_values(metadata, 'dc.description.sponsorship')
+        funders.extend(sponsorships)
+
+        # Extract projects
+        projects = []
+        project_names = cls._get_metadata_values(metadata, 'dc.relation.ispartof')
+        projects.extend(project_names)
+
+        # Also check project field
+        project_refs = cls._get_metadata_values(metadata, 'dc.relation.project')
+        projects.extend(project_refs)
+
+        # Extract lastModified (top-level field, not inside metadata)
+        # DSpace 7/8/9 format: "2017-06-24T00:40:54.970+0000" (ISO 8601)
+        last_modified_raw = dspace_item.get('lastModified')
+        last_modified = cls._parse_last_modified(last_modified_raw)
+
+        # Build comprehensive metadata object
+        extended_metadata = {
+            'dates': {
+                'issued': date_issued,
+                'accessioned': date_accessioned,
+                'available': date_available,
+                'last_modified': last_modified_raw
+            },
+            'identifiers': {
+                'uri': identifier_uri,
+                'handle': dspace_item.get('handle'),
+                'uuid': dspace_item.get('uuid')
+            },
+            'language': final_language,
+            'types': {
+                'dc_type': dspace_type,
+                'entity_type': dspace_entity_type
+            },
+            'relations': {
+                'author_publications': author_relations,
+                'author_publications_latest': author_relations_latest
+            }
+        }
+
+        # Extract thumbnail/avatar URL from DSpace item links
+        avatar_url = cls._extract_avatar_url(dspace_item)
+
+        return {
+            'publication': publication_data,
+            'creators': creators,
+            'subjects': subjects,
+            'publisher': publisher,
+            'organizations': organizations,
+            'funders': funders,
+            'projects': projects,
+            'extended_metadata': extended_metadata,
+            'last_modified': last_modified,
+            'avatar_url': avatar_url,
+            'collection_name': collection_name,
+        }
+
+    @staticmethod
+    def _get_metadata_value(metadata: Dict, field: str, default: str = None) -> Optional[str]:
+        """Get first value from metadata field"""
+        values = metadata.get(field, [])
+        if values and len(values) > 0:
+            return values[0].get('value', default)
+        return default
+
+    @staticmethod
+    def _get_metadata_values(metadata: Dict, field: str) -> List[str]:
+        """Get all values from metadata field"""
+        values = metadata.get(field, [])
+        return [v.get('value') for v in values if v.get('value')]
+
+    @classmethod
+    def _extract_avatar_url(cls, dspace_item: Dict) -> Optional[str]:
+        """
+        Extract thumbnail/avatar URL from DSpace 7+ item.
+        DSpace 7+ exposes thumbnails via _links.thumbnail.href.
+        """
+        links = dspace_item.get('_links', {})
+        thumbnail_link = links.get('thumbnail', {})
+        thumbnail_url = thumbnail_link.get('href')
+        if thumbnail_url:
+            return thumbnail_url
+        return None
+
+    @classmethod
+    def _parse_author_name(cls, full_name: str) -> tuple:
+        """Parse a full author name into (family_name, given_name).
+
+        DSpace authors are typically "LastName, FirstName" format.
+        Falls back to rsplit on space for "FirstName LastName" format.
+        """
+        name_parts = full_name.split(',', 1) if ',' in full_name else full_name.rsplit(' ', 1)
+        if len(name_parts) == 2:
+            return name_parts[0].strip(), name_parts[1].strip()
+        return full_name.strip(), ''
+
+    @classmethod
+    def _extract_creators(cls, metadata: Dict) -> List[Dict]:
+        """
+        Extract creators/authors from metadata.
+
+        Returns:
+            List of creator dicts with family_name, given_name, and role keys
+            matching what harvest_repositories.py expects.
+        """
+        creators = []
+
+        # Get authors
+        authors = cls._get_metadata_values(metadata, 'dc.contributor.author')
+        for author in authors:
+            family_name, given_name = cls._parse_author_name(author)
+            creators.append({
+                'family_name': family_name,
+                'given_name': given_name,
+                'creator_role': 'Author',
+            })
+
+        # Get other contributors
+        contributors = cls._get_metadata_values(metadata, 'dc.contributor')
+        for contributor in contributors:
+            if contributor not in authors:  # Avoid duplicates
+                family_name, given_name = cls._parse_author_name(contributor)
+                creators.append({
+                    'family_name': family_name,
+                    'given_name': given_name,
+                    'creator_role': 'Contributor',
+                })
+
+        return creators
+
+    @staticmethod
+    def _parse_last_modified(last_modified_str: Optional[str]) -> Optional[datetime]:
+        """
+        Parse DSpace lastModified timestamp to Python datetime.
+
+        DSpace 7/8/9 format: "2017-06-24T00:40:54.970+0000" (ISO 8601 with timezone)
+
+        Args:
+            last_modified_str: Raw lastModified string from DSpace item
+
+        Returns:
+            datetime object or None if parsing fails
+        """
+        if not last_modified_str:
+            return None
+
+        formats = [
+            '%Y-%m-%dT%H:%M:%S.%f%z',   # 2017-06-24T00:40:54.970+0000
+            '%Y-%m-%dT%H:%M:%S%z',       # 2017-06-24T00:40:54+0000
+            '%Y-%m-%dT%H:%M:%S.%fZ',     # 2017-06-24T00:40:54.970Z
+            '%Y-%m-%dT%H:%M:%SZ',         # 2017-06-24T00:40:54Z
+        ]
+
+        for fmt in formats:
+            try:
+                return datetime.strptime(last_modified_str, fmt)
+            except ValueError:
+                continue
+
+        return None
+
+    @staticmethod
+    def _parse_date(date_str: Optional[str]) -> Optional[str]:
+        """
+        Parse DSpace date to ISO format
+
+        Args:
+            date_str: Date string (various formats: YYYY, YYYY-MM-DD, etc.)
+
+        Returns:
+            ISO formatted date or None
+        """
+        if not date_str:
+            return None
+
+        # Try different date formats
+        formats = [
+            '%Y-%m-%d',
+            '%Y-%m',
+            '%Y',
+            '%Y-%m-%dT%H:%M:%SZ',
+        ]
+
+        for fmt in formats:
+            try:
+                dt = datetime.strptime(date_str, fmt)
+                return dt.strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+
+        # If all formats fail, return as-is if it looks like a year
+        if date_str.isdigit() and len(date_str) == 4:
+            return f"{date_str}-01-01"
+
+        return None

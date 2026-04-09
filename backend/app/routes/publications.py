@@ -1,0 +1,3487 @@
+# app/routes/publications.py
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from flask import Blueprint, jsonify, request, Response, abort
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required
+from app import db
+from app.models import Publications,PublicationFiles,PublicationDocuments,PublicationCreators,PublicationOrganization,PublicationFunders,PublicationProjects,DocidRrid,NationalIdResearcher
+from app.models import ResourceTypes,FunderTypes,CreatorsRoles,creatorsIdentifiers,PublicationIdentifierTypes,PublicationTypes,UserAccount,PublicationDrafts,PublicationAuditTrail,AccountTypes
+# from app.service_codra import push_apa_metadata
+# CORDRA imports removed - functionality moved to push_to_cordra.py script
+# from app.service_codra import update_object
+from app.service_identifiers import IdentifierService
+from sqlalchemy import desc, func, or_
+import xml.etree.ElementTree as ET
+from datetime import datetime
+import re
+import json
+from config import Config
+
+# from flasgger import Swagger
+
+# Create logs directory if it doesn't exist
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+
+# Create file handler for publications.log with rotation
+file_handler = RotatingFileHandler(
+    'logs/publications.log',
+    maxBytes=10485760,  # 10MB
+    backupCount=10
+)
+file_handler.setLevel(logging.INFO)
+
+# Create formatter and add it to handler
+formatter = logging.Formatter(
+    '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+file_handler.setFormatter(formatter)
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger.addHandler(file_handler)
+
+# Also add console handler for development
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+publications_bp = Blueprint("publications", __name__, url_prefix="/api/v1/publications")
+
+def clean_undefined_string(value):
+    """Convert JavaScript 'undefined' strings to None"""
+    if value and isinstance(value, str) and value.lower() == 'undefined':
+        return None
+    return value
+
+@publications_bp.route('/get-list-resource-types', methods=['GET'])
+# @jwt_required()
+def get_resource_types():
+
+    """
+    Fetches all publications resource-types
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: List of all resource-types
+        schema:
+          type: array
+          items:
+            type: object
+            # ... properties of a resource-types object ...
+      500:
+        description: Internal server error
+    """
+
+    try:
+        data = ResourceTypes.query.all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching resource types found'}), 404
+        data_list = [{ 'resource_type': row.resource_type, 'id': row.id} for row in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@publications_bp.route('/get-list-funder-types', methods=['GET'])
+# @jwt_required()
+def get_funder_types():
+
+    """
+    Fetches all publications funder-types
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: List of all funder-types
+        schema:
+          type: array
+          items:
+            type: object
+            # ... properties of a funder-types object ...
+      500:
+        description: Internal server error
+    """
+
+    try:
+        data = FunderTypes.query.all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching funder types found'}), 404
+        data_list = [{ 'funder_type_name': row.funder_type_name, 'id': row.id} for row in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@publications_bp.route('/get-list-creators-roles', methods=['GET'])
+# @jwt_required()
+def get_creators_roles():
+
+    """
+    Fetches all publications  Creators & Organization creators-roles
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: List of all  Creators & Organization creators-roles
+        schema:
+          type: array
+          items:
+            type: object
+            # ... properties of a  Creators & Organization creators-roles object ...
+      500:
+        description: Internal server error
+    """
+
+    try:
+        data = CreatorsRoles.query.all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching creators roles found'}), 404
+        data_list = [{ 'role_id': row.role_id, 'role_name': row.role_name } for row in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@publications_bp.route('/get-list-creators-identifiers', methods=['GET'])
+# @jwt_required()
+def get_creators_identifiers():
+
+    """
+    Fetches all publications  Creators & identifiers
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: List of all  Creators & identifiers
+        schema:
+          type: array
+          items:
+            type: object
+            # ... properties of a  Creators identifiers object ...
+      500:
+        description: Internal server error
+    """
+
+    try:
+        data = creatorsIdentifiers.query.all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching creators identifiers found'}), 404
+        data_list = [{ 'id': row.id, 'identifier_name': row.identifier_name } for row in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@publications_bp.route('/get-list-identifier-types', methods=['GET'])
+# @jwt_required()
+def get_identifier_types():
+
+    """
+    Fetches all publications identifier-types
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: List of all identifier-types
+        schema:
+          type: array
+          items:
+            type: object
+            # ... properties of a identifier-types object ...
+      500:
+        description: Internal server error
+    """
+
+    try:
+        data = PublicationIdentifierTypes.query.all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching identifier type found'}), 404
+        data_list = [{ 'identifier_type_name': row.identifier_type_name, 'id': row.id} for row in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+@publications_bp.route('/get-list-publication-types', methods=['GET'])
+# @jwt_required()
+def get_publication_types():
+
+    """
+    Fetches all publications publication-types
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: List of all publication-types
+        schema:
+          type: array
+          items:
+            type: object
+            # ... properties of a publication-types object ...
+      500:
+        description: Internal server error
+    """
+
+    try:
+        data = PublicationTypes.query.all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching publication type found'}), 404
+        data_list = [{ 'publication_type_name': row.publication_type_name, 'id': row.id} for row in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@publications_bp.route('/get-publications/<title>', methods=['GET'])
+# @jwt_required()
+def get_publications_title(title):
+    """
+    Fetches publications containing the specified title in their data.
+
+    ---
+    tags:
+      - Publications
+    parameters:
+      - in: path
+        name: title
+        type: string
+        required: true
+        description: The title or partial title to search for in the publication data.
+    responses:
+      200:
+        description: List of matching publications
+        schema:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+                description: The publication ID
+              data:
+                type: object  # Replace with actual data type if known
+                description: The publication data in JSON format
+      404:
+        description: No publications found matching the search term
+      500:
+        description: Internal server error
+    """
+    try:
+        # Search for publications containing the specified title
+        data = Publications.query.filter(Publications.document_title.ilike(f"%{title}%")).all()
+        if len(data) == 0:
+            return jsonify({'message': 'No matching records found'}), 404
+        # Prepare the response data
+        data_list = [{'id': item.id, 'data': item.form_data} for item in data]
+        return jsonify(data_list)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+      
+
+@publications_bp.route('/get-publications', methods=['GET'])
+def get_all_publications():
+    """
+    Fetches all publications with pagination and optional filtering by resource type.
+    ---
+    tags:
+      - Publications
+    parameters:
+      - in: query
+        name: page
+        type: integer
+        description: Page number to retrieve (default is 1)
+      - in: query
+        name: page_size
+        type: integer
+        description: Number of publications per page (default is 10)
+      - in: query
+        name: resource_type_id
+        type: integer
+        description: Filter publications by associated resource type ID
+      - in: query
+        name: sort
+        type: string
+        description: Sorting criteria (e.g., "published" or "title"). Default is "published".
+      - in: query
+        name: order
+        type: string
+        description: Sorting order ("asc" for ascending, "desc" for descending). Default is "desc".
+    responses:
+      200:
+        description: List of publications (with optional filters, pagination, and sorting)
+        schema:
+          type: object
+          properties:
+            data:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: integer
+                  title:
+                    type: string
+                  description:
+                    type: string
+                  resource_type_id:
+                    type: integer
+                  user_id:
+                    type: integer
+                  published:
+                    type: string
+            pagination:
+              type: object
+              properties:
+                total:
+                  type: integer
+                page:
+                  type: integer
+                page_size:
+                  type: integer
+                total_pages:
+                  type: integer
+      400:
+        description: Bad request
+      500:
+        description: Internal server error
+    """
+    try:
+        # Default pagination parameters
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('page_size', 10))
+
+        if page <= 0 or page_size <= 0:
+            return jsonify({'message': 'page and page_size must be positive integers'}), 400
+
+        # Optional search by field (all, title, author, institution, keywords)
+        search_term = request.args.get('search', '').strip()
+        search_field = request.args.get('search_field', 'all').strip().lower()
+
+        # Optional filter by account type (individual, institutional)
+        account_type_filter = request.args.get('account_type', '').strip()
+
+        # Optional filter by resource_type_id (supports multiple values)
+        resource_type_ids = request.args.getlist('resource_type_id')
+
+        # Sorting parameters
+        sort_field = request.args.get('sort', 'published')  # Default sort field is 'published'
+        order = request.args.get('order', 'desc')  # Default sort order is descending
+
+        # Validate sort order
+        if order not in ['asc', 'desc']:
+            return jsonify({'message': 'Invalid order parameter (must be "asc" or "desc")'}), 400
+
+        # Validate and set sort field
+        valid_sort_fields = ['published', 'title', 'id']
+        if sort_field not in valid_sort_fields:
+            return jsonify({'message': f'Invalid sort field (must be one of {valid_sort_fields})'}), 400
+
+        # Validate search field
+        valid_search_fields = ['all', 'title', 'author', 'institution', 'keywords']
+        if search_field not in valid_search_fields:
+            return jsonify({'message': f'Invalid search_field (must be one of {valid_search_fields})'}), 400
+
+        # Build the query using the Publications model
+        query = Publications.query
+        needs_distinct = False
+
+        # Apply search filter based on selected field
+        if search_term:
+            if search_field == 'title':
+                query = query.filter(Publications.document_title.ilike(f'%{search_term}%'))
+
+            elif search_field == 'author':
+                query = query.join(PublicationCreators).filter(
+                    or_(
+                        PublicationCreators.given_name.ilike(f'%{search_term}%'),
+                        PublicationCreators.family_name.ilike(f'%{search_term}%'),
+                        func.concat(PublicationCreators.given_name, ' ', PublicationCreators.family_name).ilike(f'%{search_term}%')
+                    )
+                )
+                needs_distinct = True
+
+            elif search_field == 'institution':
+                query = query.outerjoin(PublicationOrganization).filter(
+                    or_(
+                        PublicationOrganization.name.ilike(f'%{search_term}%'),
+                        Publications.owner.ilike(f'%{search_term}%')
+                    )
+                )
+                needs_distinct = True
+
+            elif search_field == 'keywords':
+                query = query.filter(Publications.document_description.ilike(f'%{search_term}%'))
+
+            elif search_field == 'all':
+                query = query.outerjoin(PublicationCreators).outerjoin(PublicationOrganization).filter(
+                    or_(
+                        Publications.document_title.ilike(f'%{search_term}%'),
+                        Publications.document_description.ilike(f'%{search_term}%'),
+                        Publications.owner.ilike(f'%{search_term}%'),
+                        PublicationCreators.given_name.ilike(f'%{search_term}%'),
+                        PublicationCreators.family_name.ilike(f'%{search_term}%'),
+                        PublicationOrganization.name.ilike(f'%{search_term}%')
+                    )
+                )
+                needs_distinct = True
+
+        # Apply account type filter (individual vs institutional)
+        if account_type_filter:
+            query = query.join(UserAccount, Publications.user_id == UserAccount.user_id).join(
+                AccountTypes, UserAccount.account_type_id == AccountTypes.id
+            ).filter(AccountTypes.account_type_name.ilike(account_type_filter))
+
+        # Compute resource type counts (after search filter, before resource_type filter)
+        if needs_distinct:
+            count_query = query.with_entities(
+                Publications.resource_type_id, func.count(func.distinct(Publications.id))
+            ).group_by(Publications.resource_type_id)
+        else:
+            count_query = query.with_entities(
+                Publications.resource_type_id, func.count(Publications.id)
+            ).group_by(Publications.resource_type_id)
+        resource_type_counts = {str(rt_id): count for rt_id, count in count_query.all()}
+
+        # Apply resource type filter
+        if resource_type_ids:
+            try:
+                resource_type_ids = [int(rt) for rt in resource_type_ids]
+                query = query.filter(Publications.resource_type_id.in_(resource_type_ids))
+            except ValueError:
+                return jsonify({'message': 'Invalid resource_type_id (must be an integer)'}), 400
+
+        # Apply sorting
+        sort_column = getattr(Publications, sort_field)
+        if order == 'desc':
+            sort_column = desc(sort_column)
+
+        # Apply sorting and pagination
+        offset = (page - 1) * page_size
+        if needs_distinct:
+            # Use subquery to get distinct publication IDs first, then fetch full objects
+            distinct_ids_query = query.with_entities(Publications.id).distinct()
+            query = Publications.query.filter(Publications.id.in_(distinct_ids_query))
+
+        publications = (
+            query.order_by(sort_column)
+            .limit(page_size)
+            .offset(offset)
+            .all()
+        )
+
+        # Prepare the response data
+        data_list = [
+            {
+                'id': pub.id,
+                'title': pub.document_title,
+                'description': pub.document_description,
+                'resource_type_id': pub.resource_type_id,
+                'user_id': pub.user_id,
+                'publication_poster_url': pub.publication_poster_url,
+                'docid': pub.document_docid,
+                'doi': pub.doi,
+                'owner': pub.owner,
+                'avatar': pub.avatar,
+                'published_isoformat': pub.published.isoformat() if pub.published else None,
+                'published': int(pub.published.timestamp()) if pub.published else None,  # Converted to Unix timestamp
+                'account_type_name': pub.user_account.account_type.account_type_name if pub.user_account and pub.user_account.account_type else None
+            }
+            for pub in publications
+        ]
+
+        # Pagination metadata
+        total_publications = query.count()
+        pagination = {
+            'total': total_publications,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': (total_publications + page_size - 1) // page_size
+        }
+
+        # Compute account type counts (individual vs institutional)
+        # Use OUTER JOIN to AccountTypes so users without account_type_id are included
+        account_type_count_query = db.session.query(
+            func.coalesce(AccountTypes.account_type_name, 'Unspecified'),
+            func.count(func.distinct(Publications.id))
+        ).select_from(Publications).join(
+            UserAccount, Publications.user_id == UserAccount.user_id
+        ).outerjoin(
+            AccountTypes, UserAccount.account_type_id == AccountTypes.id
+        )
+        # Apply same search filters for accurate counts
+        if search_term:
+            if search_field == 'title':
+                account_type_count_query = account_type_count_query.filter(Publications.document_title.ilike(f'%{search_term}%'))
+            elif search_field == 'author':
+                account_type_count_query = account_type_count_query.outerjoin(PublicationCreators).filter(
+                    or_(
+                        PublicationCreators.given_name.ilike(f'%{search_term}%'),
+                        PublicationCreators.family_name.ilike(f'%{search_term}%'),
+                        func.concat(PublicationCreators.given_name, ' ', PublicationCreators.family_name).ilike(f'%{search_term}%')
+                    )
+                )
+            elif search_field == 'institution':
+                account_type_count_query = account_type_count_query.outerjoin(PublicationOrganization).filter(
+                    or_(
+                        PublicationOrganization.name.ilike(f'%{search_term}%'),
+                        Publications.owner.ilike(f'%{search_term}%')
+                    )
+                )
+            elif search_field == 'keywords':
+                account_type_count_query = account_type_count_query.filter(Publications.document_description.ilike(f'%{search_term}%'))
+            elif search_field == 'all':
+                account_type_count_query = account_type_count_query.outerjoin(PublicationCreators).outerjoin(PublicationOrganization).filter(
+                    or_(
+                        Publications.document_title.ilike(f'%{search_term}%'),
+                        Publications.document_description.ilike(f'%{search_term}%'),
+                        Publications.owner.ilike(f'%{search_term}%'),
+                        PublicationCreators.given_name.ilike(f'%{search_term}%'),
+                        PublicationCreators.family_name.ilike(f'%{search_term}%'),
+                        PublicationOrganization.name.ilike(f'%{search_term}%')
+                    )
+                )
+        if resource_type_ids:
+            account_type_count_query = account_type_count_query.filter(Publications.resource_type_id.in_(resource_type_ids))
+        account_type_counts = {
+            name: count for name, count in
+            account_type_count_query.group_by(func.coalesce(AccountTypes.account_type_name, 'Unspecified')).all()
+        }
+
+        return jsonify({
+            'data': data_list,
+            'pagination': pagination,
+            'resource_type_counts': resource_type_counts,
+            'account_type_counts': account_type_counts
+        }), 200
+
+    except ValueError:
+        return jsonify({'message': 'Invalid pagination parameters (must be integers)'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@publications_bp.route('/get-publication/<int:publication_id>', methods=['GET'])
+def get_publication(publication_id):
+    """
+    Fetches a specific publication by its ID along with related tables.
+    Can be optionally filtered by user_id.
+
+    ---
+    tags:
+      - Publications
+    parameters:
+      - in: path
+        name: publication_id
+        type: integer
+        required: true
+        description: The unique identifier of the publication to retrieve.
+      - in: query
+        name: user_id
+        type: integer
+        required: false
+        description: Filter publication by user ID. If provided, will check if the publication belongs to this user.
+      - in: query
+        name: type
+        type: string
+        required: false
+        description: The format of the response, either "json" or "xml". Default is "json".
+    responses:
+      200:
+        description: Publication details
+      404:
+        description: Publication not found
+      403:
+        description: Forbidden - publication doesn't belong to the specified user
+      500:
+        description: Internal server error
+    """
+    try:
+        logger.info(f"get_publication called with publication_id={publication_id}")
+        
+        # Get user_id filter if provided
+        user_id_str = request.args.get('user_id')
+        user_id = None
+        
+        if user_id_str is not None:
+            try:
+                user_id = int(user_id_str)
+                logger.info(f"User ID filter provided: {user_id}")
+            except ValueError:
+                logger.warning(f"Invalid user_id format: {user_id_str}")
+                return jsonify({'message': 'Invalid user_id format (must be an integer)'}), 400
+
+        # First check if the publication exists
+        publication = Publications.query.filter_by(id=publication_id).first()
+        if not publication:
+            logger.warning(f"Publication not found with ID: {publication_id}")
+            return jsonify({'message': 'Publication not found'}), 404
+            
+        # Apply user_id filter if provided
+        if user_id is not None:
+            if publication.user_id != user_id:
+                logger.warning(f"Access denied: Publication {publication_id} does not belong to user {user_id}")
+                return jsonify({'message': 'Access denied: Publication does not belong to the specified user'}), 403
+            else:
+                logger.info(f"User {user_id} has access to publication {publication_id}")
+        else:
+            logger.info(f"No user_id filter provided, showing publication {publication_id} to anyone")
+            
+        # Now fetch the publication with all its related data
+        data = Publications.query \
+            .options(
+                db.joinedload(Publications.publications_files),
+                db.joinedload(Publications.publication_documents),
+                db.joinedload(Publications.publication_creators),
+                db.joinedload(Publications.publication_organizations),
+                db.joinedload(Publications.publication_funders),
+                db.joinedload(Publications.publication_projects)
+            ) \
+            .filter_by(id=publication_id) \
+            .first()
+            
+        # If data is None at this point, something went wrong
+        if data is None:
+            logger.error(f"Publication data with ID {publication_id} couldn't be loaded with relations")
+            return jsonify({'message': 'Error loading publication data'}), 500
+
+        # Create a dictionary for the main publication data
+        publication_dict = {}
+        desired_fields = ['id', 'document_title', 'document_description', 'document_docid',
+                          'resource_type_id', 'user_id', 'avatar', 'owner', 'collection_name',
+                          'publication_poster_url', 'doi', 'published', 'handle_url',
+                          'citation_count', 'influential_citation_count',
+                          'open_access_status', 'open_access_url',
+                          'openalex_topics', 'abstract_text']
+
+        # Log publication details
+        logger.info(f"Fetching publication details for ID: {publication_id}, User ID: {getattr(data, 'user_id', 'unknown')}")
+        
+        for field in desired_fields:
+            if hasattr(data, field):
+                # Special handling for datetime fields
+                if field == 'published' and getattr(data, field):
+                    publication_dict[field] = int(getattr(data, field).timestamp())
+                else:
+                    publication_dict[field] = getattr(data, field)
+
+        # Add related data
+        publication_dict['publications_files'] = [
+            {
+                'id': file.id,
+                'title': file.title,
+                'description': file.description,
+                'publication_type_id': file.publication_type_id,
+                'file_name': file.file_name,
+                'file_type': file.file_type,
+                'file_url': file.file_url,
+                'identifier': file.identifier,
+                'generated_identifier': file.generated_identifier
+            } for file in data.publications_files
+        ]
+
+        publication_dict['publication_documents'] = [
+            {
+                'id': doc.id,
+                'title': doc.title,
+                'description': doc.description,
+                'publication_type': doc.publication_type_id,
+                'file_url': doc.file_url,
+                'identifier': doc.identifier_type_id,
+                'generated_identifier': doc.generated_identifier,
+                'rrid': getattr(doc, 'rrid', None)
+            } for doc in data.publication_documents
+        ]
+
+        publication_dict['publication_creators'] = [
+            {
+                'id': creator.id,
+                'family_name': creator.family_name,
+                'given_name': creator.given_name,
+                'identifier': creator.identifier,
+                'role': creator.role_id
+            } for creator in data.publication_creators
+        ]
+
+        publication_dict['publication_organizations'] = [
+            {
+                'id': org.id,
+                'name': org.name,
+                'type': org.type,
+                'other_name': org.other_name,
+                'country': org.country,
+                'identifier': org.identifier,
+                'identifier_type': org.identifier_type,
+                'rrid': getattr(org, 'rrid', None)
+            } for org in data.publication_organizations
+        ]
+
+        publication_dict['research_resources'] = [
+            {
+                'id': r.id,
+                'rrid': r.rrid,
+                'rrid_name': r.rrid_name,
+                'rrid_description': r.rrid_description,
+                'rrid_resource_type': r.rrid_resource_type,
+                'rrid_url': r.rrid_url,
+            }
+            for r in DocidRrid.get_rrids_for_entity('publication', data.id)
+        ]
+
+        publication_dict['publication_funders'] = [
+            {
+                'id': funder.id,
+                'name': funder.name,
+                'type': funder.type,
+                'funder_type': funder.funder_type_id,
+                'other_name': funder.other_name,
+                'country': funder.country
+            } for funder in data.publication_funders
+        ]
+
+        publication_dict['publication_projects'] = [
+            {
+                'id': project.id,
+                'title': project.title,
+                'raid_id': project.raid_id,
+                'description': project.description
+            } for project in data.publication_projects
+        ]
+
+        # Determine response format
+        response_type = request.args.get('type', 'json').lower()
+
+        if response_type == 'xml':
+            # Convert the dictionary to XML
+            root = ET.Element("publication")
+            for key, value in publication_dict.items():
+                if isinstance(value, list):
+                    list_root = ET.SubElement(root, key)
+                    for item in value:
+                        item_root = ET.SubElement(list_root, "item")
+                        for k, v in item.items():
+                            ET.SubElement(item_root, k).text = str(v)
+                else:
+                    ET.SubElement(root, key).text = str(value)
+
+            xml_response = ET.tostring(root, encoding='utf-8')
+            return Response(xml_response, content_type='application/xml')
+
+        # Default to JSON response
+        return jsonify(publication_dict), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@publications_bp.route('/docid', methods=['GET'])
+def get_publication_by_docid_prefix():
+    """
+    Fetches a specific publication by its document DocID along with related tables.
+
+    ---
+    tags:
+      - Publications
+    parameters:
+      - in: query
+        name: docid
+        type: string
+        required: true
+        description: The unique DocID of the publication to retrieve.
+      - in: query
+        name: type
+        type: string
+        required: false
+        description: The format of the response, either "json" or "xml". Default is "json".
+    responses:
+      200:
+        description: Publication details
+      404:
+        description: Publication not found
+      500:
+        description: Internal server error
+    """
+    try:
+        # Get docid from query parameter
+        document_docid = request.args.get('docid')
+
+        if not document_docid:
+            return jsonify({'error': 'docid parameter is required'}), 400
+
+        # Retrieve the publication data with all related tables using joinedload
+        data = Publications.query \
+            .options(
+                db.joinedload(Publications.publications_files),
+                db.joinedload(Publications.publication_documents),
+                db.joinedload(Publications.publication_creators),
+                db.joinedload(Publications.publication_organizations),
+                db.joinedload(Publications.publication_funders),
+                db.joinedload(Publications.publication_projects)
+            ) \
+            .filter_by(document_docid=document_docid) \
+            .first()
+
+        if not data:
+            return jsonify({'message': 'No matching records found'}), 404
+
+        # Create a dictionary for the main publication data
+        publication_dict = {}
+        desired_fields = ['id', 'document_title', 'document_description', 'document_docid',
+                          'resource_type_id', 'user_id', 'avatar', 'owner', 'collection_name',
+                          'publication_poster_url', 'doi', 'published', 'handle_url',
+                          'citation_count', 'influential_citation_count',
+                          'open_access_status', 'open_access_url',
+                          'openalex_topics', 'abstract_text']
+
+        # Update main publication data with Unix timestamp for `published`
+        for field in desired_fields:
+            if hasattr(data, field):
+                if field == 'published' and getattr(data, field):
+                    publication_dict[field] = int(getattr(data, field).timestamp())
+                else:
+                    publication_dict[field] = getattr(data, field)
+
+        # Add related data
+        publication_dict['publications_files'] = [
+            {
+                'id': file.id,
+                'title': file.title,
+                'description': file.description,
+                'publication_type_id': file.publication_type_id,
+                'file_name': file.file_name,
+                'file_type': file.file_type,
+                'file_url': file.file_url,
+                'identifier': file.identifier,
+                'generated_identifier': file.generated_identifier
+            } for file in data.publications_files
+        ]
+
+        publication_dict['publication_documents'] = [
+            {
+                'id': doc.id,
+                'title': doc.title,
+                'description': doc.description,
+                'publication_type': doc.publication_type_id,
+                'file_url': doc.file_url,
+                'identifier': doc.identifier_type_id,
+                'generated_identifier': doc.generated_identifier,
+                'rrid': getattr(doc, 'rrid', None)
+            } for doc in data.publication_documents
+        ]
+
+        publication_dict['publication_creators'] = [
+            {
+                'id': creator.id,
+                'family_name': creator.family_name,
+                'given_name': creator.given_name,
+                'identifier': creator.identifier,
+                'role': creator.role_id
+            } for creator in data.publication_creators
+        ]
+
+        publication_dict['publication_organizations'] = [
+            {
+                'id': org.id,
+                'name': org.name,
+                'type': org.type,
+                'other_name': org.other_name,
+                'country': org.country,
+                'identifier': org.identifier,
+                'identifier_type': org.identifier_type,
+                'rrid': getattr(org, 'rrid', None)
+            } for org in data.publication_organizations
+        ]
+
+        publication_dict['research_resources'] = [
+            {
+                'id': r.id,
+                'rrid': r.rrid,
+                'rrid_name': r.rrid_name,
+                'rrid_description': r.rrid_description,
+                'rrid_resource_type': r.rrid_resource_type,
+                'rrid_url': r.rrid_url,
+            }
+            for r in DocidRrid.get_rrids_for_entity('publication', data.id)
+        ]
+
+        publication_dict['publication_funders'] = [
+            {
+                'id': funder.id,
+                'name': funder.name,
+                'type': funder.type,
+                'funder_type': funder.funder_type_id,
+                'other_name': funder.other_name,
+                'country': funder.country
+            } for funder in data.publication_funders
+        ]
+
+        publication_dict['publication_projects'] = [
+            {
+                'id': project.id,
+                'title': project.title,
+                'raid_id': project.raid_id,
+                'description': project.description
+            } for project in data.publication_projects
+        ]
+
+        # Determine response format
+        response_type = request.args.get('type', 'json').lower()
+
+        if response_type == 'xml':
+            # Convert the dictionary to XML
+            root = ET.Element("publication")
+            for key, value in publication_dict.items():
+                if isinstance(value, list):
+                    list_root = ET.SubElement(root, key)
+                    for item in value:
+                        item_root = ET.SubElement(list_root, "item")
+                        for k, v in item.items():
+                            ET.SubElement(item_root, k).text = str(v)
+                else:
+                    ET.SubElement(root, key).text = str(value)
+
+            xml_response = ET.tostring(root, encoding='utf-8')
+            return Response(xml_response, content_type='application/xml')
+
+        # Default to JSON response
+        return jsonify(publication_dict), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@publications_bp.route('/<path:document_docid>', methods=['GET'])
+def get_publication_by_docid_simple(document_docid):
+    """
+    Fetches a specific publication by its document DocID at the root level.
+    Similar to get_publication_by_docid but accessible at example.com/{docid}
+    
+    This endpoint provides the same functionality as /docid/{docid} but with a cleaner URL structure.
+
+    ---
+    tags:
+      - Publications
+    parameters:
+      - in: path
+        name: document_docid
+        type: string
+        required: true
+        description: The unique DocID of the publication to retrieve.
+      - in: query
+        name: type
+        type: string
+        required: false
+        description: The format of the response, either "json" or "xml". Default is "json".
+    responses:
+      200:
+        description: Publication details
+      404:
+        description: Publication not found
+      500:
+        description: Internal server error
+    """
+    try:
+        # Validate DocID format to avoid conflicts with other routes
+        # A typical DocID might look like: 20.500.14351/834ce32a04333cd91d4b
+        docid_pattern = r'^\d+(\.\d+)+\/.+$'
+        if not re.match(docid_pattern, document_docid):
+            # If it doesn't match DocID pattern, return 404 to let other routes handle it
+            abort(404)
+            
+        logger.info(f"get_publication_by_docid_simple called with document_docid={document_docid}")
+        
+        # Retrieve the publication data with all related tables using joinedload
+        data = Publications.query \
+            .options(
+                db.joinedload(Publications.publications_files),
+                db.joinedload(Publications.publication_documents),
+                db.joinedload(Publications.publication_creators),
+                db.joinedload(Publications.publication_organizations),
+                db.joinedload(Publications.publication_funders),
+                db.joinedload(Publications.publication_projects)
+            ) \
+            .filter_by(document_docid=document_docid) \
+            .first()
+
+        if not data:
+            logger.warning(f"No publication found with DocID: {document_docid}")
+            return jsonify({'message': 'No matching records found'}), 404
+
+        # Create a dictionary for the main publication data
+        publication_dict = {}
+        desired_fields = ['id', 'document_title', 'document_description', 'document_docid',
+                          'resource_type_id', 'user_id', 'avatar', 'owner', 'collection_name',
+                          'publication_poster_url', 'doi', 'published', 'handle_url',
+                          'citation_count', 'influential_citation_count',
+                          'open_access_status', 'open_access_url',
+                          'openalex_topics', 'abstract_text']
+
+        # Update main publication data with Unix timestamp for `published`
+        for field in desired_fields:
+            if hasattr(data, field):
+                if field == 'published' and getattr(data, field):
+                    publication_dict[field] = int(getattr(data, field).timestamp())
+                else:
+                    publication_dict[field] = getattr(data, field)
+
+        # Add related data
+        publication_dict['publications_files'] = [
+            {
+                'id': file.id,
+                'title': file.title,
+                'description': file.description,
+                'publication_type_id': file.publication_type_id,
+                'file_name': file.file_name,
+                'file_type': file.file_type,
+                'file_url': file.file_url,
+                'identifier': file.identifier,
+                'generated_identifier': file.generated_identifier
+            } for file in data.publications_files
+        ]
+
+        publication_dict['publication_documents'] = [
+            {
+                'id': doc.id,
+                'title': doc.title,
+                'description': doc.description,
+                'publication_type': doc.publication_type_id,
+                'file_url': doc.file_url,
+                'identifier': doc.identifier_type_id,
+                'generated_identifier': doc.generated_identifier,
+                'rrid': getattr(doc, 'rrid', None)
+            } for doc in data.publication_documents
+        ]
+
+        publication_dict['publication_creators'] = [
+            {
+                'id': creator.id,
+                'family_name': creator.family_name,
+                'given_name': creator.given_name,
+                'identifier': creator.identifier,
+                'role': creator.role_id
+            } for creator in data.publication_creators
+        ]
+
+        publication_dict['publication_organizations'] = [
+            {
+                'id': org.id,
+                'name': org.name,
+                'type': org.type,
+                'other_name': org.other_name,
+                'country': org.country,
+                'identifier': org.identifier,
+                'identifier_type': org.identifier_type,
+                'rrid': getattr(org, 'rrid', None)
+            } for org in data.publication_organizations
+        ]
+
+        publication_dict['research_resources'] = [
+            {
+                'id': r.id,
+                'rrid': r.rrid,
+                'rrid_name': r.rrid_name,
+                'rrid_description': r.rrid_description,
+                'rrid_resource_type': r.rrid_resource_type,
+                'rrid_url': r.rrid_url,
+            }
+            for r in DocidRrid.get_rrids_for_entity('publication', data.id)
+        ]
+
+        publication_dict['publication_funders'] = [
+            {
+                'id': funder.id,
+                'name': funder.name,
+                'type': funder.type,
+                'funder_type': funder.funder_type_id,
+                'other_name': funder.other_name,
+                'country': funder.country
+            } for funder in data.publication_funders
+        ]
+
+        publication_dict['publication_projects'] = [
+            {
+                'id': project.id,
+                'title': project.title,
+                'raid_id': project.raid_id,
+                'description': project.description
+            } for project in data.publication_projects
+        ]
+
+        # Determine response format
+        response_type = request.args.get('type', 'json').lower()
+
+        if response_type == 'xml':
+            # Convert the dictionary to XML
+            root = ET.Element("publication")
+            for key, value in publication_dict.items():
+                if isinstance(value, list):
+                    list_root = ET.SubElement(root, key)
+                    for item in value:
+                        item_root = ET.SubElement(list_root, "item")
+                        for k, v in item.items():
+                            ET.SubElement(item_root, k).text = str(v)
+                else:
+                    ET.SubElement(root, key).text = str(value)
+
+            xml_response = ET.tostring(root, encoding='utf-8')
+            return Response(xml_response, content_type='application/xml')
+
+        # Default to JSON response
+        logger.info(f"Successfully retrieved publication for DocID: {document_docid}")
+        return jsonify(publication_dict), 200
+
+    except Exception as e:
+        logger.error(f"Error retrieving publication by DocID {document_docid}: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@publications_bp.route('/publish', methods=['POST'])
+# @jwt_required()
+def create_publication():
+    """
+    Create a new  Publication
+
+    This endpoint allows users to create a new  publication, including associated files, documents, creators, organizations, funders, and projects.
+
+    ---
+    tags:
+      -  Publications
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: documentDocid
+        in: formData
+        type: string
+        required: true
+        description: The document's unique identifier.
+      - name: documentTitle
+        in: formData
+        type: string
+        required: true
+        description: The title of the document.
+      - name: documentDescription
+        in: formData
+        type: string
+        required: true
+        description: A brief description of the document.
+      - name: resourceType
+        in: formData
+        type: string
+        required: true
+        description: The type of the resource being published.
+      - name: user_id
+        in: formData
+        type: integer
+        required: true
+        description: The ID of the user creating the publication.
+      - name: owner
+        in: formData
+        type: string
+        required: true
+        description: The owner of the publication.
+      - name: doi
+        in: formData
+        type: string
+        required: true
+        description: The DOI of the publication.
+      - name: publicationPoster
+        in: formData
+        type: file
+        required: false
+        description: The poster image for the publication.
+      - name: avatar
+        in: formData
+        type: string
+        required: false
+        description: URL to the avatar image of the owner.
+    responses:
+      200:
+        description:  Publication created successfully.
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              description: Success message.
+            publication_id:
+              type: integer
+              description: ID of the created publication.
+      400:
+        description: Bad Request. Required fields are missing or contain invalid data.
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              description: Error message.
+      500:
+        description: Internal Server Error.
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              description: Error message.
+    """
+    try:
+        # Log the start of the request
+        logger.info(f"=== START: Create Publication Request at {datetime.now()} ===")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        
+        # Create a complete data dump for logging
+        logger.info("=" * 80)
+        logger.info("COMPLETE REQUEST DATA DUMP:")
+        logger.info("=" * 80)
+        
+        # Log all form data with INFO level for better visibility
+        logger.info("FORM DATA RECEIVED:")
+        logger.info("-" * 40)
+        for key, value in request.form.items():
+            # Truncate very long values for readability
+            display_value = value[:500] + "..." if len(value) > 500 else value
+            logger.info(f"  {key}: {display_value}")
+        logger.info(f"Total form fields: {len(request.form)}")
+        
+        # Log all files with INFO level
+        logger.info("-" * 40)
+        logger.info("FILES RECEIVED:")
+        logger.info("-" * 40)
+        for key, file in request.files.items():
+            logger.info(f"  {key}:")
+            logger.info(f"    - Filename: {file.filename}")
+            logger.info(f"    - Content Type: {file.content_type}")
+            logger.info(f"    - Content Length: {file.content_length if hasattr(file, 'content_length') else 'N/A'}")
+        logger.info(f"Total files: {len(request.files)}")
+        
+        # Log request size information
+        logger.info("-" * 40)
+        logger.info("REQUEST SIZE INFORMATION:")
+        logger.info(f"  Content-Length header: {request.headers.get('Content-Length', 'Not specified')}")
+        logger.info(f"  Content-Type: {request.headers.get('Content-Type', 'Not specified')}")
+        
+        # Log parsed JSON data if available
+        if request.is_json:
+            logger.info("-" * 40)
+            logger.info("JSON DATA RECEIVED:")
+            logger.info(f"  {request.get_json()}")
+        
+        logger.info("=" * 80)
+        
+        # Access form data from request.form and files from request.files
+        document_docid = request.form.get('documentDocid')
+        document_title = request.form.get('documentTitle')
+        document_description = request.form.get('documentDescription')
+        resource_type = request.form.get('resourceType')
+        user_id = request.form.get('user_id')
+        doi = clean_undefined_string(request.form.get('doi'))
+        owner = request.form.get('owner')
+        publication_poster = request.files.get('publicationPoster')
+        avatar = clean_undefined_string(request.form.get('avatar'))  # Assuming it's a URL
+
+        # Log main publication data
+        logger.info("Main publication data:")
+        logger.info(f"  documentDocid: {document_docid}")
+        logger.info(f"  documentTitle: {document_title}")
+        logger.info(f"  documentDescription: {document_description[:100]}..." if document_description and len(document_description) > 100 else f"  documentDescription: {document_description}")
+        logger.info(f"  resourceType: {resource_type}")
+        logger.info(f"  user_id: {user_id}")
+        logger.info(f"  doi: {doi}")
+        logger.info(f"  owner: {owner}")
+        logger.info(f"  publicationPoster: {publication_poster.filename if publication_poster else 'None'}")
+        logger.info(f"  avatar: {avatar}")
+
+         # Validate required fields
+        missing_fields = []
+
+        if not document_docid:
+            missing_fields.append('documentDocid')
+        if not document_title:
+            missing_fields.append('documentTitle')
+        if not document_description:
+            missing_fields.append('documentDescription')
+        if not resource_type:
+            missing_fields.append('resourceType')
+        if not user_id:
+            missing_fields.append('user_id')
+        if not owner:
+            missing_fields.append('owner')
+
+        if missing_fields:
+            logger.warning(f"Missing required fields: {', '.join(missing_fields)}")
+            return jsonify({'message': f'Missing required fields: {", ".join(missing_fields)}'}), 400
+ 
+        # Try to convert the resource_type to an integer
+        try:
+            resource_type = int(resource_type)
+        except ValueError:
+            logger.error(f"Invalid resource type '{resource_type}' - not an integer")
+            return jsonify({"message": f"Invalid resource type '{resource_type}'."}), 400
+
+        # Now validate the resource type by querying the database
+        resource_type_obj = ResourceTypes.query.filter_by(id=resource_type).first()
+        if not resource_type_obj:
+            logger.error(f"Resource type '{resource_type}' validation failed")
+            return jsonify({"message": f"Invalid resource type '{resource_type}'."}), 400
+
+        resource_type_id = resource_type_obj.id
+        logger.info(f"Resource type validated: ID={resource_type_id}")
+
+        
+        # Try to convert the resource_type to an integer
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            logger.error(f"Invalid user id type '{user_id}' - not an integer")
+            return jsonify({"message": f"Invalid user id type '{user_id}'."}), 400
+
+        # Validate user
+        user = UserAccount.query.filter_by(user_id=user_id).first()
+        if not user:
+            logger.error(f"User '{user_id}' validation failed")
+            return jsonify({"message": f"Invalid user '{user_id}'."}), 400
+        
+        logger.info(f"User validated: ID={user_id}")
+
+        # Handle file uploads if they exist
+        publication_poster_url = None
+        if publication_poster:
+            poster_filename = publication_poster.filename
+            publication_poster.save(f'uploads/{poster_filename}')
+            # Always use production domain for consistency
+            base_url = 'https://docid.africapidalliance.org'
+            publication_poster_url = f'{base_url}/uploads/{poster_filename}'
+            logger.info(f"Publication poster saved: {publication_poster_url}")
+
+        # Create the publication record
+        publication = Publications(
+            user_id=user_id,
+            # document_docid=document_docid_live,
+            document_docid=document_docid,
+            document_title=document_title,
+            document_description=document_description,
+            owner=owner,
+            doi=doi,
+            resource_type_id=resource_type_id,
+            avatar=avatar,
+            publication_poster_url=publication_poster_url
+        )
+        db.session.add(publication)
+
+        # Flush to get the newly created ID
+        db.session.flush()
+        publication_id = publication.id
+        logger.info(f"Publication created with ID: {publication_id}")
+        
+        # Schedule CORDRA push to run after 1 minute
+        try:
+            from app.tasks import push_to_cordra_async
+            # Schedule the task to run after 60 seconds
+            push_to_cordra_async.apply_async(args=[publication_id], countdown=60)
+            logger.info(f"Scheduled CORDRA push for publication {publication_id} to run in 60 seconds")
+        except ImportError:
+            logger.warning("Celery not configured. CORDRA push will need to be run manually via push_to_cordra.py script")
+
+        # Save PublicationFiles records
+        logger.info("Processing PublicationFiles...")
+        files_publications = []
+        index = 0
+        while True:
+            file_title = request.form.get(f'filesPublications[{index}][title]')
+            if file_title is None:
+                break
+
+            file_description = clean_undefined_string(request.form.get(f'filesPublications[{index}][description]'))
+            publication_type = request.form.get(f'filesPublications[{index}][publication_type]')
+            file_type = request.form.get(f'filesPublications[{index}][file_type]')
+            identifier = request.form.get(f'filesPublications[{index}][identifier]')
+            generated_identifier = request.form.get(f'filesPublications[{index}][generated_identifier]')
+            file = request.files.get(f'filesPublications_{index}_file')
+
+            logger.info(f"PublicationFile [{index}]:")
+            logger.info(f"  title: {file_title}")
+            logger.info(f"  description: {file_description}")
+            logger.info(f"  publication_type: {publication_type}")
+            logger.info(f"  file_type: {file_type}")
+            logger.info(f"  identifier: {identifier}")
+            logger.info(f"  generated_identifier: {generated_identifier}")
+            logger.info(f"  file: {file.filename if file else 'None'}")
+
+            try:
+                publication_type = int(publication_type) if publication_type else None
+            except ValueError:
+                logger.error(f"Invalid publication_type at index {index}: {publication_type}")
+                return jsonify({'message': f'Invalid input for publication_type at index {index}. Expected an integer.'}), 400
+
+            # Validate publication type
+            if publication_type is None:
+                logger.error(f"Publication type is required at index {index}")
+                return jsonify({'message': f'Publication type is required at index {index}.'}), 400
+                
+            publication_type_obj = PublicationTypes.query.filter_by(id=publication_type).first()
+            if not publication_type_obj:
+                logger.error(f"Invalid publication type '{publication_type}' at index {index}")
+                return jsonify({'message': f'Invalid publication type \'{publication_type}\' at index {index}.'}), 400
+              
+            publication_type_id = publication_type_obj.id
+              
+            file_url = None
+            file_filename = None
+            handle_id = None
+            external_id = None
+            external_id_type = None
+            
+            if file:
+                file_filename = file.filename
+                file.save(f'uploads/{file_filename}')
+                # Always use production domain for consistency
+                base_url = 'https://docid.africapidalliance.org'
+                file_url = f'{base_url}/uploads/{file_filename}'
+                logger.info(f"File saved: {file_url}")
+
+                # Process the identifier
+                handle_id, external_id, external_id_type = IdentifierService.process_identifier(generated_identifier)
+                
+                # Only create PublicationFiles record if there's an actual file uploaded
+                files_publications.append(PublicationFiles(
+                    publication_id=publication_id,
+                    title=file_title,
+                    description=file_description,
+                    publication_type_id=publication_type_id,
+                    file_name=file_filename,
+                    file_type=file_type,
+                    file_url=file_url,
+                    identifier=identifier, # type: ignore
+                    generated_identifier=generated_identifier,
+                    handle_identifier=handle_id,
+                    external_identifier=external_id,
+                    external_identifier_type=external_id_type
+                ))
+                
+                # CORDRA push has been moved to separate script push_to_cordra.py
+                if handle_id:
+                    logger.info(f"PublicationFile [{index}] has handle: {handle_id}. CORDRA push will be handled by push_to_cordra.py script")
+                else:
+                    logger.warning(f"No Handle available for PublicationFile [{index}]")
+            else:
+                logger.warning(f"PublicationFile [{index}] has no file uploaded - skipping file record creation")
+            
+            index += 1
+        
+        if files_publications:
+            db.session.bulk_save_objects(files_publications)
+            logger.info(f"Saved {len(files_publications)} PublicationFiles")
+
+        # Save PublicationDocuments records
+        logger.info("Processing PublicationDocuments...")
+        files_documents = []
+        index = 0
+        while True:
+          file_title = request.form.get(f'filesDocuments[{index}][title]')
+          if file_title is None:
+              break
+          
+          file_description = clean_undefined_string(request.form.get(f'filesDocuments[{index}][description]'))
+          publication_type = request.form.get(f'filesDocuments[{index}][publication_type]')
+          identifier_type_id = request.form.get(f'filesDocuments[{index}][identifier]')
+          generated_identifier = request.form.get(f'filesDocuments[{index}][generated_identifier]')
+          rrid_value = (request.form.get(f'filesDocuments[{index}][rrid]') or '').strip() or None
+          file = request.files.get(f'filesDocuments_{index}_file')
+          
+          logger.info(f"PublicationDocument [{index}]:")
+          logger.info(f"  title: {file_title}")
+          logger.info(f"  description: {file_description}")
+          logger.info(f"  publication_type: {publication_type}")
+          logger.info(f"  identifier_type_id: {identifier_type_id}")
+          logger.info(f"  generated_identifier: {generated_identifier}")
+          logger.info(f"  rrid: {rrid_value}")
+          logger.info(f"  file: {file.filename if file else 'None'}")
+
+          try:
+              publication_type = int(publication_type) if publication_type else None
+          except ValueError:
+              logger.error(f"Invalid publication_type at index {index}: {publication_type}")
+              return jsonify({'message': f'Invalid input for Publication Documents publication_type at index {index}. Expected an integer.'}), 400
+          
+          # Validate publication type
+          if publication_type is None:
+              logger.error(f"Publication type is required at index {index}")
+              return jsonify({'message': f'Publication type is required at index {index}.'}), 400
+                
+          publication_type_obj = PublicationTypes.query.filter_by(id=publication_type).first()
+          if not publication_type_obj:
+              logger.error(f"Invalid publication type '{publication_type}' at index {index}")
+              return jsonify({'message': f'Invalid publication type \'{publication_type}\' at index {index}.'}), 400
+          
+          publication_type_id = publication_type_obj.id
+          
+          # Handle identifier_type_id - make it optional
+          validated_identifier_type_id = None
+          if identifier_type_id:  # Only process if identifier_type_id is provided
+              try:
+                  identifier_type_id = int(identifier_type_id)
+              except ValueError:
+                  logger.error(f"Invalid identifier_type_id at index {index}: {identifier_type_id}")
+                  return jsonify({'message': f'Invalid input for identifier_type_id at index {index}. Expected an integer.'}), 400
+              
+              # Validate identifier type
+              identifier_type = PublicationIdentifierTypes.query.filter_by(id=identifier_type_id).first()
+              if not identifier_type:
+                  logger.error(f"Invalid identifier type ID {identifier_type_id} at index {index}")
+                  return jsonify({'message': f'Invalid identifier type ID {identifier_type_id} at index {index}.'}), 400
+              
+              # If identifier_type_id is provided, generated_identifier is required
+              if not generated_identifier or generated_identifier.strip() == '':
+                  logger.error(f"Missing generated_identifier when identifier_type_id is provided at index {index}")
+                  return jsonify({'message': f'generated_identifier is required when identifier_type_id is provided at index {index}.'}), 400
+              
+              validated_identifier_type_id = identifier_type_id
+          else:
+              # If no identifier_type_id, set generated_identifier to None
+              generated_identifier = None
+          
+          file_url = None
+          handle_id = None
+          external_id = None
+          external_id_type = None
+          
+          if file:
+              file_filename = file.filename
+              file.save(f'uploads/{file_filename}')
+              # Always use production domain for consistency
+              base_url = 'https://docid.africapidalliance.org'
+              file_url = f'{base_url}/uploads/{file_filename}'
+              logger.info(f"File saved: {file_url}")
+
+              # Process the identifier only if we have generated_identifier and a file
+              if generated_identifier:
+                  handle_id, external_id, external_id_type = IdentifierService.process_identifier(generated_identifier)
+              
+              # Only create PublicationDocuments record if there's an actual file uploaded
+              files_documents.append(PublicationDocuments(
+                  publication_id=publication_id,
+                  title=file_title,
+                  description=file_description,
+                  publication_type_id=publication_type_id,
+                  file_url=file_url,
+                  identifier_type_id=validated_identifier_type_id,  # Use validated value
+                  generated_identifier=generated_identifier,
+                  handle_identifier=handle_id,
+                  external_identifier=external_id,
+                  external_identifier_type=external_id_type,
+                  rrid=rrid_value
+              ))
+              
+              # CORDRA push has been moved to separate script push_to_cordra.py
+              if handle_id:
+                  logger.info(f"PublicationDocument [{index}] has handle: {handle_id}. CORDRA push will be handled by push_to_cordra.py script")
+              else:
+                  logger.warning(f"No Handle available for PublicationDocument [{index}]")
+          else:
+              logger.warning(f"PublicationDocument [{index}] has no file uploaded - skipping document record creation")
+          
+          index += 1
+
+        if files_documents:
+            db.session.bulk_save_objects(files_documents)
+            logger.info(f"Saved {len(files_documents)} PublicationDocuments")
+
+        # Save PublicationCreators records
+        logger.info("Processing PublicationCreators...")
+        creators = []
+        index = 0
+        while True:
+            family_name = request.form.get(f'creators[{index}][family_name]')
+            if family_name is None:
+                break
+
+            given_name = request.form.get(f'creators[{index}][given_name]')
+            identifier_type = request.form.get(f'creators[{index}][identifier]')  # This contains 'orcid', 'isni', etc.
+            role_id = request.form.get(f'creators[{index}][role]')
+            
+            # Get the actual identifier value based on the type
+            identifier_value = None
+            if identifier_type:
+                # Try to get the specific identifier value (e.g., creators[0][orcid] or creators[0][orcid_id])
+                identifier_value = request.form.get(f'creators[{index}][{identifier_type}]')
+                if not identifier_value:
+                    # Try with _id suffix (e.g., creators[0][orcid_id])
+                    identifier_value = request.form.get(f'creators[{index}][{identifier_type}_id]')
+            
+            # Format identifier as resolvable URL
+            resolvable_identifier = None
+            if identifier_type and identifier_value:
+                if identifier_type.lower() == 'orcid':
+                    # Format ORCID as resolvable URL - check if already formatted
+                    if identifier_value.startswith('https://orcid.org/'):
+                        resolvable_identifier = identifier_value
+                    elif identifier_value.startswith('orcid.org/'):
+                        resolvable_identifier = f"https://{identifier_value}"
+                    else:
+                        # Just the ORCID ID part, add the full URL
+                        resolvable_identifier = f"https://orcid.org/{identifier_value}"
+                elif identifier_type.lower() == 'isni':
+                    # Format ISNI as resolvable URL
+                    if identifier_value.startswith('https://isni.org/'):
+                        resolvable_identifier = identifier_value
+                    else:
+                        resolvable_identifier = f"https://isni.org/isni/{identifier_value}"
+                elif identifier_type.lower() == 'viaf':
+                    # Format VIAF as resolvable URL
+                    if identifier_value.startswith('https://viaf.org/'):
+                        resolvable_identifier = identifier_value
+                    else:
+                        resolvable_identifier = f"https://viaf.org/viaf/{identifier_value}"
+                else:
+                    # For unknown types, store the raw value
+                    resolvable_identifier = identifier_value
+            
+            logger.info(f"PublicationCreator [{index}]:")
+            logger.info(f"  family_name: {family_name}")
+            logger.info(f"  given_name: {given_name}")
+            logger.info(f"  identifier_type: {identifier_type}")
+            logger.info(f"  identifier_value: {identifier_value}")
+            logger.info(f"  resolvable_identifier: {resolvable_identifier}")
+            logger.info(f"  role_id: {role_id}")
+            
+            # Debug logging for identifier lookup
+            if identifier_type:
+                debug_value1 = request.form.get(f'creators[{index}][{identifier_type}]')
+                debug_value2 = request.form.get(f'creators[{index}][{identifier_type}_id]')
+                logger.info(f"  DEBUG - Looking for creators[{index}][{identifier_type}]: {debug_value1}")
+                logger.info(f"  DEBUG - Looking for creators[{index}][{identifier_type}_id]: {debug_value2}")
+         
+            # try:
+            #     role_id = int(role_id) if role_id else None
+            # except ValueError:
+            #     return jsonify({'message': f'Invalid input for Publication Creators role_id at index {index}. Expected an integer.'}), 400
+
+            # Validate role
+            creators_role = CreatorsRoles.validate_creators_role(role_id)
+            if not creators_role:
+                logger.error(f"Invalid creators role '{role_id}' at index {index}")
+                raise ValueError(f"Invalid creators role '{role_id}'.")
+            
+            role_id  = creators_role.role_id
+              
+            creators.append(PublicationCreators(
+                publication_id=publication_id,
+                family_name=family_name,
+                given_name=given_name,
+                identifier=resolvable_identifier,  # Store the full resolvable URL
+                identifier_type=identifier_type,   # Store the type (e.g., 'orcid')
+                role_id=role_id
+            ))
+            index += 1
+        
+        if creators:
+            db.session.bulk_save_objects(creators)
+            logger.info(f"Saved {len(creators)} PublicationCreators")
+
+        # Save National ID Creators
+        logger.info("Processing National ID Creators...")
+        national_id_creators = []
+        national_id_creators_index = 0
+        while True:
+            creator_name = request.form.get(f'creatorsNationalId[{national_id_creators_index}][name]')
+            if creator_name is None:
+                break
+
+            national_id_number = request.form.get(f'creatorsNationalId[{national_id_creators_index}][national_id_number]', '').strip()
+            creator_country = request.form.get(f'creatorsNationalId[{national_id_creators_index}][country]', '').strip()
+            creator_name = creator_name.strip()
+
+            logger.info(f"NationalIdCreator [{national_id_creators_index}]: name={creator_name}, national_id={national_id_number}, country={creator_country}")
+
+            if creator_name and national_id_number and creator_country:
+                # Upsert into NationalIdResearcher registry
+                existing_researcher = NationalIdResearcher.query.filter_by(
+                    national_id_number=national_id_number,
+                    country=creator_country
+                ).first()
+
+                if not existing_researcher:
+                    new_researcher = NationalIdResearcher(
+                        name=creator_name,
+                        national_id_number=national_id_number,
+                        country=creator_country
+                    )
+                    db.session.add(new_researcher)
+                    db.session.flush()
+                    logger.info(f"Registered new National ID researcher: {creator_name}")
+                elif existing_researcher.name != creator_name:
+                    existing_researcher.name = creator_name
+
+                # Save as PublicationCreators with identifier_type='national_id'
+                national_id_creators.append(PublicationCreators(
+                    publication_id=publication_id,
+                    family_name=creator_name,
+                    given_name='',
+                    identifier=national_id_number,
+                    identifier_type='national_id',
+                    role_id='creator'
+                ))
+
+            national_id_creators_index += 1
+
+        if national_id_creators:
+            db.session.bulk_save_objects(national_id_creators)
+            logger.info(f"Saved {len(national_id_creators)} National ID PublicationCreators")
+
+        # Save PublicationOrganization records
+        logger.info("Processing PublicationOrganizations...")
+        organizations = []
+
+        # Helper function to format identifier as resolvable URL
+        def format_organization_identifier(identifier_type, identifier_value):
+            if not identifier_type or not identifier_value:
+                return None
+            if identifier_type.lower() == 'ror':
+                if identifier_value.startswith('https://ror.org/'):
+                    return identifier_value
+                elif identifier_value.startswith('ror.org/'):
+                    return f"https://{identifier_value}"
+                else:
+                    return f"https://ror.org/{identifier_value}"
+            elif identifier_type.lower() == 'grid':
+                if not identifier_value.startswith('http'):
+                    return f"https://www.grid.ac/institutes/{identifier_value}"
+                else:
+                    return identifier_value
+            elif identifier_type.lower() == 'isni':
+                if identifier_value.startswith('https://isni.org/'):
+                    return identifier_value
+                else:
+                    return f"https://isni.org/isni/{identifier_value}"
+            elif identifier_type.lower() == 'ringgold':
+                if identifier_value.startswith('https://'):
+                    return identifier_value
+                else:
+                    return f"https://www.ringgold.com/ringgold-identifier/?id={identifier_value}"
+            else:
+                return identifier_value
+
+        # Process organizations from multiple sources: organization[], organizationRor[], organizationIsni[], organizationRinggold[]
+        organization_sources = [
+            ('organization', None),      # Legacy format with auto-detect identifier type
+            ('organizationRor', 'ror'),  # ROR organizations
+            ('organizationIsni', 'isni'), # ISNI organizations
+            ('organizationRinggold', 'ringgold')  # Ringgold organizations
+        ]
+
+        for source_prefix, default_identifier_type in organization_sources:
+            index = 0
+            while True:
+                name = request.form.get(f'{source_prefix}[{index}][name]')
+                if name is None:
+                    break
+
+                org_type = request.form.get(f'{source_prefix}[{index}][type]')
+                other_name = clean_undefined_string(request.form.get(f'{source_prefix}[{index}][other_name]'))
+                country = request.form.get(f'{source_prefix}[{index}][country]')
+
+                # Get identifier fields
+                identifier_type = request.form.get(f'{source_prefix}[{index}][identifier_type]')
+                identifier_value = request.form.get(f'{source_prefix}[{index}][identifier]')
+
+                # If no explicit identifier, check for ror_id field
+                if not identifier_value:
+                    ror_id = request.form.get(f'{source_prefix}[{index}][ror_id]')
+                    if ror_id:
+                        identifier_value = ror_id
+                        if not identifier_type:
+                            identifier_type = default_identifier_type or 'ror'
+                
+            
+
+                # If still no identifier type but we have a default from the source
+                if not identifier_type and default_identifier_type and identifier_value:
+                    identifier_type = default_identifier_type
+
+                # Legacy fallback for organization[] format
+                if source_prefix == 'organization' and not identifier_type and not identifier_value:
+                    ror_id = request.form.get(f'{source_prefix}[{index}][ror]')
+                    if not ror_id:
+                        ror_id = request.form.get(f'{source_prefix}[{index}][ror_id]')
+                    if ror_id:
+                        identifier_type = 'ror'
+                        identifier_value = ror_id
+                    else:
+                        grid_id = request.form.get(f'{source_prefix}[{index}][grid]')
+                        if not grid_id:
+                            grid_id = request.form.get(f'{source_prefix}[{index}][grid_id]')
+                        if grid_id:
+                            identifier_type = 'grid'
+                            identifier_value = grid_id
+
+                resolvable_identifier = format_organization_identifier(identifier_type, identifier_value)
+
+                rrid_value = (request.form.get(f'{source_prefix}[{index}][rrid]') or '').strip() or None
+
+                logger.info(f"PublicationOrganization [{source_prefix}][{index}]:")
+                logger.info(f"  name: {name}")
+                logger.info(f"  type: {org_type}")
+                logger.info(f"  other_name: {other_name}")
+                logger.info(f"  country: {country}")
+                logger.info(f"  identifier_type: {identifier_type}")
+                logger.info(f"  identifier_value: {identifier_value}")
+                logger.info(f"  resolvable_identifier: {resolvable_identifier}")
+                logger.info(f"  rrid: {rrid_value}")
+
+                organizations.append(PublicationOrganization(
+                    publication_id=publication_id,
+                    name=name,
+                    type=org_type,
+                    other_name=other_name,
+                    country=country,
+                    identifier=resolvable_identifier,
+                    identifier_type=identifier_type,
+                    rrid=rrid_value
+                ))
+                index += 1
+
+        if organizations:
+            db.session.bulk_save_objects(organizations)
+            logger.info(f"Saved {len(organizations)} PublicationOrganizations")
+
+        # Save PublicationFunders records
+        logger.info("Processing PublicationFunders...")
+        funders = []
+        index = 0
+        while True:
+            name = request.form.get(f'funders[{index}][name]')
+            if name is None:
+                break
+
+            other_name = clean_undefined_string(request.form.get(f'funders[{index}][other_name]'))            
+            funder_type = request.form.get(f'funders[{index}][type]')
+            funder_category = request.form.get(f'funders[{index}][type]')
+            country = request.form.get(f'funders[{index}][country]')
+            
+            # Get identifier fields (e.g., ROR ID)
+            identifier_type = request.form.get(f'funders[{index}][identifier_type]')  # e.g., 'ror'
+            identifier_value = request.form.get(f'funders[{index}][identifier]')  # e.g., '01ej9dk98'
+            
+            # If no explicit identifier_type but we have a ROR field, handle it
+            if not identifier_type and not identifier_value:
+                # Check for specific identifier fields like funders[0][ror] or funders[0][ror_id]
+                ror_id = request.form.get(f'funders[{index}][ror]')
+                if not ror_id:
+                    ror_id = request.form.get(f'funders[{index}][ror_id]')
+                if ror_id:
+                    identifier_type = 'ror'
+                    identifier_value = ror_id
+            
+            # Format identifier as resolvable URL
+            resolvable_identifier = None
+            if identifier_type and identifier_value:
+                if identifier_type.lower() == 'ror':
+                    # Format ROR as resolvable URL
+                    # ROR IDs can come with or without the URL prefix
+                    if identifier_value.startswith('https://ror.org/'):
+                        resolvable_identifier = identifier_value
+                    elif identifier_value.startswith('ror.org/'):
+                        resolvable_identifier = f"https://{identifier_value}"
+                    else:
+                        # Just the ID part, add the full URL
+                        resolvable_identifier = f"https://ror.org/{identifier_value}"
+                elif identifier_type.lower() == 'fundref':
+                    # Format FundRef (Crossref Funder ID) as resolvable URL
+                    if not identifier_value.startswith('http'):
+                        resolvable_identifier = f"https://doi.org/10.13039/{identifier_value}"
+                    else:
+                        resolvable_identifier = identifier_value
+                elif identifier_type.lower() == 'isni':
+                    # Format ISNI as resolvable URL
+                    resolvable_identifier = f"https://isni.org/isni/{identifier_value}"
+                else:
+                    # For unknown types, store the raw value
+                    resolvable_identifier = identifier_value
+            
+            logger.info(f"PublicationFunder [{index}]:")
+            logger.info(f"  name: {name}")
+            logger.info(f"  other_name: {other_name}")
+            logger.info(f"  funder_type: {funder_type}")
+            logger.info(f"  funder_category: {funder_category}")
+            logger.info(f"  country: {country}")
+            logger.info(f"  identifier_type: {identifier_type}")
+            logger.info(f"  identifier_value: {identifier_value}")
+            logger.info(f"  resolvable_identifier: {resolvable_identifier}")
+            
+            # Debug logging for identifier lookup
+            debug_ror1 = request.form.get(f'funders[{index}][ror]')
+            debug_ror2 = request.form.get(f'funders[{index}][ror_id]')
+            logger.info(f"  DEBUG - Looking for funders[{index}][ror]: {debug_ror1}")
+            logger.info(f"  DEBUG - Looking for funders[{index}][ror_id]: {debug_ror2}")
+            
+            # check funder_type_id
+            
+            
+            try:
+                funder_type = int(funder_type) if funder_type else None
+            except ValueError:
+                logger.error(f"Invalid funder_type at index {index}: {funder_type}")
+                return jsonify({'message': f'Invalid input for Publication Funders  funder_type at index {index}. Expected an integer.'}), 400
+
+            # Validate funder type
+            if funder_type is None:
+                logger.error(f"Funder type is required at index {index}")
+                return jsonify({'message': f'Funder type is required at index {index}.'}), 400
+                
+            funder_type_obj = FunderTypes.query.filter_by(id=funder_type).first()
+            if not funder_type_obj:
+                logger.error(f"Invalid Funders type '{funder_type}' at index {index}")
+                return jsonify({'message': f'Invalid Funders type \'{funder_type}\' at index {index}.'}), 400
+            
+            funder_type_id = funder_type_obj.id
+
+            funders.append(PublicationFunders(
+                publication_id=publication_id,
+                name=name,
+                type=funder_category,
+                funder_type_id=funder_type_id,
+                other_name=other_name,
+                country=country,
+                identifier=resolvable_identifier,  # Store the full resolvable URL
+                identifier_type=identifier_type    # Store the type (e.g., 'ror')
+            ))
+            index += 1
+        
+        if funders:
+            db.session.bulk_save_objects(funders)
+            logger.info(f"Saved {len(funders)} PublicationFunders")
+
+        # Save PublicationProjects records
+        logger.info("Processing PublicationProjects...")
+        projects = []
+        index = 0
+        while True:
+            title = request.form.get(f'projects[{index}][title]')
+            if title is None:
+                break
+
+            raid_id = request.form.get(f'projects[{index}][raid_id]')
+            description = clean_undefined_string(request.form.get(f'projects[{index}][description]'))
+            # For NOT NULL columns, use empty string instead of None
+            if description is None:
+                description = ""
+            
+            # Format RAID as identifier
+            resolvable_identifier = None
+            identifier_type = None
+            if raid_id:
+                identifier_type = 'raid'
+                # RAID is already a URL, just ensure it's properly formatted
+                if raid_id.startswith('http://') or raid_id.startswith('https://'):
+                    resolvable_identifier = raid_id
+                elif raid_id.startswith('10.'):  # Handle format like 10.80368/b1adfb3a
+                    resolvable_identifier = f"https://app.demo.raid.org.au/raids/{raid_id}"
+                else:
+                    # Assume it's just the ID part
+                    resolvable_identifier = f"https://app.demo.raid.org.au/raids/{raid_id}"
+            
+            logger.info(f"PublicationProject [{index}]:")
+            logger.info(f"  title: {title}")
+            logger.info(f"  raid_id: {raid_id}")
+            logger.info(f"  description: {description}")
+            logger.info(f"  identifier_type: {identifier_type}")
+            logger.info(f"  identifier: {resolvable_identifier}")
+
+            projects.append(PublicationProjects(
+                publication_id=publication_id,
+                title=title,
+                raid_id=raid_id,  # Keep for backward compatibility
+                description=description,
+                identifier=resolvable_identifier,  # Store the full resolvable URL
+                identifier_type=identifier_type    # Store as 'raid'
+            ))
+            index += 1
+        
+        if projects:
+            db.session.bulk_save_objects(projects)
+            logger.info(f"Saved {len(projects)} PublicationProjects")
+
+        # Save DocidRrid records (Research Resources)
+        logger.info("Processing Research Resources (RRIDs)...")
+        rrid_records = []
+        index = 0
+        while True:
+            rrid_value = request.form.get(f'researchResources[{index}][rrid]')
+            if rrid_value is None:
+                break
+
+            rrid_name = request.form.get(f'researchResources[{index}][rrid_name]')
+            rrid_description = clean_undefined_string(request.form.get(f'researchResources[{index}][rrid_description]'))
+            rrid_resource_type = request.form.get(f'researchResources[{index}][rrid_resource_type]')
+            rrid_url = request.form.get(f'researchResources[{index}][rrid_url]')
+            resolved_json_str = request.form.get(f'researchResources[{index}][resolved_json]')
+
+            resolved_json = None
+            if resolved_json_str:
+                try:
+                    resolved_json = json.loads(resolved_json_str)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Could not parse resolved_json for RRID at index {index}")
+
+            logger.info(f"ResearchResource [{index}]:")
+            logger.info(f"  rrid: {rrid_value}")
+            logger.info(f"  rrid_name: {rrid_name}")
+            logger.info(f"  rrid_resource_type: {rrid_resource_type}")
+
+            rrid_records.append(DocidRrid(
+                entity_type='publication',
+                entity_id=publication_id,
+                rrid=rrid_value,
+                rrid_name=rrid_name,
+                rrid_description=rrid_description,
+                rrid_resource_type=rrid_resource_type,
+                rrid_url=rrid_url,
+                resolved_json=resolved_json,
+                last_resolved_at=datetime.utcnow(),
+            ))
+            index += 1
+
+        if rrid_records:
+            db.session.bulk_save_objects(rrid_records)
+            logger.info(f"Saved {len(rrid_records)} DocidRrid records")
+
+        # Commit all changes
+        db.session.commit()
+
+        logger.info(f"=== SUCCESS: Publication created successfully with ID: {publication_id} ===")
+
+        # Prepare full publication data to return
+        publication_data = {
+            'id': publication.id,
+            'document_title': publication.document_title,
+            'document_description': publication.document_description,
+            'document_docid': publication.document_docid,
+            'resource_type_id': publication.resource_type_id,
+            'user_id': publication.user_id,
+            'owner': publication.owner,
+            'doi': publication.doi,
+            'avatar': publication.avatar,
+            'publication_poster_url': publication.publication_poster_url,
+            'published': int(publication.published.timestamp()) if publication.published else None
+        }
+        
+        return jsonify({
+            "message": "Publication created successfully", 
+            "publication_id": publication_id,
+            "publication": publication_data
+        }), 200
+
+    except Exception as e:
+        logger.error(f"=== ERROR: Failed to create publication ===")
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error message: {str(e)}")
+        logger.error(f"Stack trace:", exc_info=True)
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+# ===== DRAFT MANAGEMENT ENDPOINTS =====
+
+@publications_bp.route('/draft', methods=['POST'])
+def save_draft():
+    """
+    Save draft form data for assign-docid form
+    ---
+    tags:
+      - Publications
+    consumes:
+      - application/json
+    parameters:
+      - name: body
+        in: body
+        required: true
+        schema:
+          type: object
+          properties:
+            email:
+              type: string
+              description: User email
+            resource_type_id:
+              type: integer
+              description: Resource type ID for this draft
+            formData:
+              type: object
+              description: Complete form state
+    responses:
+      200:
+        description: Draft saved successfully
+      400:
+        description: Missing required data
+      500:
+        description: Internal server error
+    """
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        email = data.get('email')
+        resource_type_id = data.get('resource_type_id')
+        form_data = data.get('formData')
+
+        if not email or not form_data:
+            return jsonify({'error': 'Email and formData are required'}), 400
+
+        # Default to resource_type_id=1 if not provided (backward compatibility)
+        if not resource_type_id:
+            resource_type_id = 1
+
+        logger.info(f"Saving draft for user: {email}, resource_type_id: {resource_type_id}")
+
+        # Save draft data
+        draft = PublicationDrafts.save_draft(email, resource_type_id, form_data)
+
+        return jsonify({
+            'message': 'Draft saved successfully',
+            'timestamp': draft.updated_at.isoformat(),
+            'resource_type_id': draft.resource_type_id,
+            'saved': True
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error saving draft: {str(e)}")
+        return jsonify({'error': 'Failed to save draft'}), 500
+
+
+@publications_bp.route('/draft/<email>', methods=['GET'])
+def get_all_drafts_for_user(email):
+    """
+    Get all saved drafts for user (returns array of drafts)
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: email
+        in: path
+        type: string
+        required: true
+        description: User email
+    responses:
+      200:
+        description: Drafts retrieved successfully
+      500:
+        description: Internal server error
+    """
+    try:
+        logger.info(f"Retrieving all drafts for user: {email}")
+
+        drafts = PublicationDrafts.get_all_drafts_by_email(email)
+
+        if not drafts:
+            return jsonify({
+                'message': 'No drafts found',
+                'hasDrafts': False,
+                'drafts': []
+            }), 200
+
+        return jsonify({
+            'hasDrafts': True,
+            'drafts': [draft.to_dict() for draft in drafts],
+            'count': len(drafts),
+            'message': 'Drafts retrieved successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error retrieving drafts: {str(e)}")
+        return jsonify({'error': 'Failed to retrieve drafts'}), 500
+
+
+@publications_bp.route('/draft/<email>/<int:resource_type_id>', methods=['GET'])
+def get_specific_draft(email, resource_type_id):
+    """
+    Get specific draft for user by email and resource_type_id
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: email
+        in: path
+        type: string
+        required: true
+        description: User email
+      - name: resource_type_id
+        in: path
+        type: integer
+        required: true
+        description: Resource type ID
+    responses:
+      200:
+        description: Draft data retrieved successfully
+      404:
+        description: No draft data found
+      500:
+        description: Internal server error
+    """
+    try:
+        logger.info(f"Retrieving draft for user: {email}, resource_type_id: {resource_type_id}")
+
+        draft = PublicationDrafts.get_draft(email, resource_type_id)
+
+        if not draft:
+            return jsonify({'message': 'No draft found', 'hasDraft': False}), 200
+
+        return jsonify({
+            'hasDraft': True,
+            'formData': draft.form_data,
+            'resource_type_id': draft.resource_type_id,
+            'resource_type_name': draft.resource_type.resource_type if draft.resource_type else None,
+            'lastSaved': draft.updated_at.isoformat(),
+            'message': 'Draft retrieved successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error retrieving draft: {str(e)}")
+        return jsonify({'error': 'Failed to retrieve draft'}), 500
+
+
+@publications_bp.route('/draft/<email>/<int:resource_type_id>', methods=['DELETE'])
+def delete_draft_data(email, resource_type_id):
+    """
+    Delete specific draft after successful submission
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: email
+        in: path
+        type: string
+        required: true
+        description: User email
+      - name: resource_type_id
+        in: path
+        type: integer
+        required: true
+        description: Resource type ID
+    responses:
+      200:
+        description: Draft deleted successfully
+      404:
+        description: No draft found
+      500:
+        description: Internal server error
+    """
+    try:
+        logger.info(f"Deleting draft for user: {email}, resource_type_id: {resource_type_id}")
+
+        deleted = PublicationDrafts.delete_draft(email, resource_type_id)
+
+        if deleted:
+            return jsonify({'message': 'Draft deleted successfully'}), 200
+        else:
+            return jsonify({'message': 'No draft found to delete'}), 404
+
+    except Exception as e:
+        logger.error(f"Error deleting draft: {str(e)}")
+        return jsonify({'error': 'Failed to delete draft'}), 500
+
+
+@publications_bp.route('/drafts/stats', methods=['GET'])
+def get_draft_stats():
+    """
+    Get draft statistics for admin dashboard (optional)
+    ---
+    tags:
+      - Publications
+    responses:
+      200:
+        description: Draft statistics
+      500:
+        description: Internal server error
+    """
+    try:
+        total_drafts = PublicationDrafts.get_user_drafts_count()
+
+        return jsonify({
+            'totalDrafts': total_drafts,
+            'message': 'Draft statistics retrieved successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error retrieving draft stats: {str(e)}")
+        return jsonify({'error': 'Failed to retrieve draft statistics'}), 500
+
+
+@publications_bp.route('/draft/by-user/<int:user_id>', methods=['GET'])
+def get_drafts_by_user_id(user_id):
+    """
+    Get all saved drafts for user by user_id
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+        description: User ID
+    responses:
+      200:
+        description: Drafts retrieved successfully
+      404:
+        description: User not found
+      500:
+        description: Internal server error
+    """
+    try:
+        logger.info(f"Retrieving all drafts for user_id: {user_id}")
+
+        # First, get the user's email from user_id
+        user = UserAccount.query.get(user_id)
+        if not user:
+            return jsonify({
+                'error': 'User not found',
+                'hasDrafts': False
+            }), 404
+
+        # Get all drafts for this user
+        drafts = PublicationDrafts.get_all_drafts_by_email(user.email)
+
+        if not drafts:
+            return jsonify({
+                'message': 'No drafts found',
+                'hasDrafts': False,
+                'drafts': [],
+                'user_email': user.email
+            }), 200
+
+        return jsonify({
+            'hasDrafts': True,
+            'drafts': [draft.to_dict() for draft in drafts],
+            'count': len(drafts),
+            'user_email': user.email,
+            'message': 'Drafts retrieved successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error retrieving draft by user_id: {str(e)}")
+        return jsonify({'error': 'Failed to retrieve draft'}), 500
+
+
+@publications_bp.route('/update-publication/<int:publication_id>', methods=['PUT'])
+def update_publication(publication_id):
+    """
+    Update an existing publication
+    
+    This endpoint allows users to update their own publications, including associated files, documents, 
+    creators, organizations, funders, and projects. Changes are logged in the audit trail.
+    
+    ---
+    tags:
+      - Publications
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: publication_id
+        in: path
+        type: integer
+        required: true
+        description: The unique identifier of the publication to update.
+      - name: user_id
+        in: formData
+        type: integer
+        required: true
+        description: The ID of the user updating the publication (must own the publication).
+      - name: documentTitle
+        in: formData
+        type: string
+        required: false
+        description: The updated title of the document.
+      - name: documentDescription
+        in: formData
+        type: string
+        required: false
+        description: The updated description of the document.
+      - name: resourceType
+        in: formData
+        type: string
+        required: false
+        description: The updated type of the resource.
+      - name: doi
+        in: formData
+        type: string
+        required: false
+        description: The updated DOI of the publication.
+      - name: publicationPoster
+        in: formData
+        type: file
+        required: false
+        description: The updated poster image for the publication.
+      - name: avatar
+        in: formData
+        type: string
+        required: false
+        description: Updated URL to the avatar image of the owner.
+    responses:
+      200:
+        description: Publication updated successfully.
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              description: Success message.
+            publication_id:
+              type: integer
+              description: ID of the updated publication.
+      400:
+        description: Bad Request. Invalid data or missing required fields.
+      403:
+        description: Forbidden. User doesn't own this publication.
+      404:
+        description: Publication not found.
+      500:
+        description: Internal Server Error.
+    """
+    try:
+        logger.info(f"=== START: Update Publication Request for ID {publication_id} at {datetime.now()} ===")
+        
+        # Get user_id from form data
+        user_id_str = request.form.get('user_id')
+        if not user_id_str:
+            logger.warning("Missing user_id in update request")
+            return jsonify({'message': 'User ID is required'}), 400
+        
+        try:
+            user_id = int(user_id_str)
+        except ValueError:
+            logger.warning(f"Invalid user_id format: {user_id_str}")
+            return jsonify({'message': 'Invalid user_id format (must be an integer)'}), 400
+        
+        # Check if publication exists and user owns it
+        publication = Publications.query.filter_by(id=publication_id).first()
+        if not publication:
+            logger.warning(f"Publication not found with ID: {publication_id}")
+            return jsonify({'message': 'Publication not found'}), 404
+            
+        if publication.user_id != user_id:
+            logger.warning(f"Access denied: User {user_id} doesn't own publication {publication_id}")
+            return jsonify({'message': 'Access denied: You can only edit your own publications'}), 403
+        
+        # Check publication status (workflow state validation)
+        # Note: Add status field check when available in Publications model
+        # For now, assume all publications can be edited
+        
+        # Get client information for audit trail
+        ip_address = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        user_agent = request.headers.get('User-Agent', '')
+        
+        # Track changes for audit trail
+        changes_made = []
+        
+        # Log request data for debugging
+        logger.info("Update request form data:")
+        for key, value in request.form.items():
+            display_value = value[:100] + "..." if len(value) > 100 else value
+            logger.info(f"  {key}: {display_value}")
+        
+        # Update title if provided
+        new_title = request.form.get('documentTitle')
+        if new_title and new_title != publication.document_title:
+            old_value = publication.document_title
+            publication.document_title = new_title
+            changes_made.append({
+                'field': 'document_title',
+                'old_value': old_value,
+                'new_value': new_title
+            })
+            logger.info(f"Title updated from '{old_value}' to '{new_title}'")
+        
+        # Update description if provided  
+        new_description = request.form.get('documentDescription')
+        if new_description and new_description != publication.document_description:
+            old_value = publication.document_description
+            publication.document_description = new_description
+            changes_made.append({
+                'field': 'document_description',
+                'old_value': old_value,
+                'new_value': new_description
+            })
+            logger.info(f"Description updated")
+        
+        # Update resource type if provided
+        new_resource_type = request.form.get('resourceType')
+        if new_resource_type:
+            try:
+                resource_type_id = int(new_resource_type)
+                # Validate resource type exists
+                resource_type_obj = ResourceTypes.query.filter_by(id=resource_type_id).first()
+                if not resource_type_obj:
+                    return jsonify({'message': f'Invalid resource type ID: {resource_type_id}'}), 400
+                
+                if resource_type_id != publication.resource_type_id:
+                    old_value = publication.resource_type_id
+                    publication.resource_type_id = resource_type_id
+                    changes_made.append({
+                        'field': 'resource_type_id',
+                        'old_value': str(old_value),
+                        'new_value': str(resource_type_id)
+                    })
+                    logger.info(f"Resource type updated from {old_value} to {resource_type_id}")
+            except ValueError:
+                return jsonify({'message': f'Invalid resource type format: {new_resource_type}'}), 400
+        
+        # Update DOI if provided
+        new_doi = clean_undefined_string(request.form.get('doi'))
+        if new_doi and new_doi != publication.doi:
+            old_value = publication.doi
+            publication.doi = new_doi
+            changes_made.append({
+                'field': 'doi',
+                'old_value': old_value,
+                'new_value': new_doi
+            })
+            logger.info(f"DOI updated from '{old_value}' to '{new_doi}'")
+        
+        # Update avatar if provided
+        new_avatar = clean_undefined_string(request.form.get('avatar'))
+        if new_avatar and new_avatar != publication.avatar:
+            old_value = publication.avatar
+            publication.avatar = new_avatar
+            changes_made.append({
+                'field': 'avatar',
+                'old_value': old_value,
+                'new_value': new_avatar
+            })
+            logger.info(f"Avatar updated")
+        
+        # Handle file uploads (publication poster)
+        publication_poster = request.files.get('publicationPoster')
+        if publication_poster and publication_poster.filename:
+            # TODO: Implement file upload logic similar to create_publication
+            # This would involve saving the file and updating publication_poster_url
+            logger.info(f"New publication poster uploaded: {publication_poster.filename}")
+            # For now, log the change without implementing full file upload
+            changes_made.append({
+                'field': 'publication_poster_url',
+                'old_value': publication.publication_poster_url,
+                'new_value': f'New file: {publication_poster.filename}'
+            })
+        
+        # Update the updated_at and updated_by fields
+        publication.updated_at = datetime.utcnow()
+        publication.updated_by = user_id
+        
+        # Save changes to database
+        if changes_made:
+            try:
+                db.session.commit()
+                logger.info(f"Publication {publication_id} updated successfully with {len(changes_made)} changes")
+                
+                # Log each change in audit trail
+                for change in changes_made:
+                    PublicationAuditTrail.log_change(
+                        publication_id=publication_id,
+                        user_id=user_id,
+                        action='UPDATE',
+                        field_name=change['field'],
+                        old_value=change['old_value'],
+                        new_value=change['new_value'],
+                        ip_address=ip_address,
+                        user_agent=user_agent
+                    )
+                    logger.info(f"Audit trail logged for field: {change['field']}")
+                
+                return jsonify({
+                    'message': 'Publication updated successfully',
+                    'publication_id': publication_id,
+                    'changes_count': len(changes_made)
+                }), 200
+                
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Database error during update: {str(e)}")
+                return jsonify({'error': 'Failed to save changes to database'}), 500
+        else:
+            logger.info(f"No changes detected for publication {publication_id}")
+            return jsonify({
+                'message': 'No changes detected',
+                'publication_id': publication_id,
+                'changes_count': 0
+            }), 200
+            
+    except Exception as e:
+        logger.error(f"Error updating publication {publication_id}: {str(e)}")
+        return jsonify({'error': 'Internal server error during publication update'}), 500
+
+
+# Helper endpoint to get publication for editing (with user ownership validation)
+@publications_bp.route('/get-publication-for-edit/<int:publication_id>', methods=['GET'])
+def get_publication_for_edit(publication_id):
+    """
+    Get publication data specifically for editing purposes
+    
+    This endpoint returns publication data with user ownership validation and includes
+    all related data needed for the edit form.
+    
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: publication_id
+        in: path
+        type: integer
+        required: true
+        description: The unique identifier of the publication.
+      - name: user_id
+        in: query
+        type: integer
+        required: true
+        description: The user ID requesting edit access (must own the publication).
+    responses:
+      200:
+        description: Publication data for editing
+      400:
+        description: Missing or invalid user_id
+      403:
+        description: Access denied - user doesn't own the publication
+      404:
+        description: Publication not found
+      500:
+        description: Internal server error
+    """
+    try:
+        logger.info(f"Get publication for edit: ID={publication_id}")
+        
+        # Get and validate user_id
+        user_id_str = request.args.get('user_id')
+        if not user_id_str:
+            return jsonify({'message': 'User ID parameter is required'}), 400
+        
+        try:
+            user_id = int(user_id_str)
+        except ValueError:
+            return jsonify({'message': 'Invalid user_id format (must be an integer)'}), 400
+        
+        # Check if publication exists
+        publication = Publications.query.filter_by(id=publication_id).first()
+        if not publication:
+            logger.warning(f"Publication not found with ID: {publication_id}")
+            return jsonify({'message': 'Publication not found'}), 404
+        
+        # Check user ownership
+        if publication.user_id != user_id:
+            logger.warning(f"Edit access denied: Publication {publication_id} does not belong to user {user_id}")
+            return jsonify({'message': 'Access denied: You can only edit your own publications'}), 403
+        
+        # Check publication status (workflow state validation)
+        # TODO: Implement status checking when status field is available
+        # For now, assume all publications can be edited
+        
+        # Use existing get_publication endpoint logic but with ownership already validated
+        # Fetch publication with all related data
+        data = Publications.query \
+            .options(
+                db.joinedload(Publications.publications_files),
+                db.joinedload(Publications.publication_documents),
+                db.joinedload(Publications.publication_creators),
+                db.joinedload(Publications.publication_organizations),
+                db.joinedload(Publications.publication_funders),
+                db.joinedload(Publications.publication_projects)
+            ) \
+            .filter_by(id=publication_id) \
+            .first()
+        
+        if data is None:
+            logger.error(f"Publication data with ID {publication_id} couldn't be loaded with relations")
+            return jsonify({'message': 'Error loading publication data'}), 500
+        
+        # Build response data (similar to get_publication but optimized for editing)
+        publication_dict = {}
+        desired_fields = ['id', 'document_title', 'document_description', 'document_docid',
+                          'resource_type_id', 'user_id', 'avatar', 'owner', 'publication_poster_url', 
+                          'doi', 'published', 'updated_at', 'updated_by']
+        
+        for field in desired_fields:
+            if hasattr(data, field):
+                value = getattr(data, field)
+                if field in ['published', 'updated_at'] and value:
+                    publication_dict[field] = int(value.timestamp())
+                else:
+                    publication_dict[field] = value
+        
+        # Add related data
+        publication_dict['publications_files'] = [
+            {
+                'id': file.id,
+                'title': file.title,
+                'description': file.description,
+                'publication_type_id': file.publication_type_id,
+                'file_name': file.file_name,
+                'file_type': file.file_type,
+                'file_url': file.file_url,
+                'identifier': file.identifier,
+                'generated_identifier': file.generated_identifier,
+                'handle_identifier': getattr(file, 'handle_identifier', None),
+                'external_identifier': getattr(file, 'external_identifier', None),
+                'external_identifier_type': getattr(file, 'external_identifier_type', None)
+            } for file in data.publications_files
+        ]
+        
+        publication_dict['publication_documents'] = [
+            {
+                'id': doc.id,
+                'title': doc.title,
+                'description': doc.description,
+                'publication_type': doc.publication_type_id,
+                'file_url': doc.file_url,
+                'identifier': doc.identifier_type_id,
+                'generated_identifier': doc.generated_identifier,
+                'handle_identifier': getattr(doc, 'handle_identifier', None),
+                'external_identifier': getattr(doc, 'external_identifier', None),
+                'external_identifier_type': getattr(doc, 'external_identifier_type', None),
+                'rrid': getattr(doc, 'rrid', None)
+            } for doc in data.publication_documents
+        ]
+        
+        publication_dict['publication_creators'] = [
+            {
+                'id': creator.id,
+                'family_name': creator.family_name,
+                'given_name': creator.given_name,
+                'identifier': creator.identifier,
+                'role': creator.role_id,
+                'identifier_type': getattr(creator, 'identifier_type', None)
+            } for creator in data.publication_creators
+        ]
+        
+        publication_dict['publication_organizations'] = [
+            {
+                'id': org.id,
+                'name': org.name,
+                'type': org.type,
+                'other_name': org.other_name,
+                'country': org.country,
+                'identifier': getattr(org, 'identifier', None),
+                'identifier_type': getattr(org, 'identifier_type', None),
+                'rrid': getattr(org, 'rrid', None)
+            } for org in data.publication_organizations
+        ]
+
+        publication_dict['research_resources'] = [
+            {
+                'id': r.id,
+                'rrid': r.rrid,
+                'rrid_name': r.rrid_name,
+                'rrid_description': r.rrid_description,
+                'rrid_resource_type': r.rrid_resource_type,
+                'rrid_url': r.rrid_url,
+            }
+            for r in DocidRrid.get_rrids_for_entity('publication', data.id)
+        ]
+
+        publication_dict['publication_funders'] = [
+            {
+                'id': funder.id,
+                'funder_name': funder.funder_name,
+                'funder_type_id': funder.funder_type_id,
+                'award_number': funder.award_number,
+                'award_title': funder.award_title,
+                'award_uri': funder.award_uri,
+                'identifier': getattr(funder, 'identifier', None),
+                'identifier_type': getattr(funder, 'identifier_type', None)
+            } for funder in data.publication_funders
+        ]
+        
+        publication_dict['publication_projects'] = [
+            {
+                'id': project.id,
+                'project_name': project.project_name,
+                'project_description': project.project_description,
+                'project_acronym': project.project_acronym,
+                'identifier': getattr(project, 'identifier', None),
+                'identifier_type': getattr(project, 'identifier_type', None)
+            } for project in data.publication_projects
+        ]
+        
+        logger.info(f"Publication data for edit retrieved successfully: ID={publication_id}, User={user_id}")
+        return jsonify(publication_dict), 200
+
+    except Exception as e:
+        logger.error(f"Error retrieving publication for edit {publication_id}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+
+@publications_bp.route('/<int:publication_id>', methods=['DELETE'])
+@jwt_required()
+def delete_publication(publication_id):
+    """
+    Delete a publication by ID (requires authentication)
+    ---
+    tags:
+      - Publications
+    security:
+      - Bearer: []
+    parameters:
+      - name: publication_id
+        in: path
+        type: integer
+        required: true
+        description: The ID of the publication to delete
+    responses:
+      200:
+        description: Publication deleted successfully
+        schema:
+          type: object
+          properties:
+            message:
+              type: string
+              example: Publication deleted successfully
+      401:
+        description: Unauthorized - Authentication required
+      403:
+        description: Forbidden - Cannot delete published documents or user not authorized
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: Cannot delete published documents. Please contact support.
+      404:
+        description: Publication not found
+        schema:
+          type: object
+          properties:
+            error:
+              type: string
+              example: Publication not found
+      500:
+        description: Internal server error
+    """
+    try:
+        from flask_jwt_extended import get_jwt_identity
+
+        # Get the current user from JWT token
+        current_user_id = get_jwt_identity()
+        logger.info(f"User {current_user_id} attempting to delete publication with ID: {publication_id}")
+
+        # Find the publication
+        publication = Publications.query.get(publication_id)
+
+        if not publication:
+            logger.warning(f"Publication not found: ID={publication_id}")
+            return jsonify({'error': 'Publication not found'}), 404
+
+        # Check if the current user owns this publication
+        if publication.user_id != current_user_id:
+            logger.warning(f"User {current_user_id} attempted to delete publication {publication_id} owned by user {publication.user_id}")
+            return jsonify({
+                'error': 'You do not have permission to delete this publication'
+            }), 403
+
+        # Check if publication is published (has a DOCiD assigned)
+        if publication.document_docid:
+            logger.warning(f"Attempt to delete published publication: ID={publication_id}, DOCiD={publication.document_docid}")
+            return jsonify({
+                'error': 'Cannot delete published documents at this time. Please contact support if you need to remove this publication.'
+            }), 403
+
+        # Store info for logging before deletion
+        publication_title = publication.document_title
+        user_id = publication.user_id
+
+        # Delete related records first (cascading delete)
+        try:
+            # Delete publication creators
+            PublicationCreators.query.filter_by(publication_id=publication_id).delete()
+
+            # Delete attached RRIDs for this publication
+            DocidRrid.query.filter_by(entity_type='publication', entity_id=publication_id).delete()
+
+            # Delete attached RRIDs for this publication's organizations
+            publication_organization_ids = [
+                org.id for org in PublicationOrganization.query.filter_by(
+                    publication_id=publication_id
+                ).all()
+            ]
+            if publication_organization_ids:
+                DocidRrid.query.filter(
+                    DocidRrid.entity_type == 'organization',
+                    DocidRrid.entity_id.in_(publication_organization_ids)
+                ).delete(synchronize_session='fetch')
+
+            # Delete publication organizations
+            PublicationOrganization.query.filter_by(publication_id=publication_id).delete()
+
+            # Delete publication funders
+            PublicationFunders.query.filter_by(publication_id=publication_id).delete()
+
+            # Delete publication projects
+            PublicationProjects.query.filter_by(publication_id=publication_id).delete()
+
+            # Delete publication files
+            PublicationFiles.query.filter_by(publication_id=publication_id).delete()
+
+            # Delete publication documents
+            PublicationDocuments.query.filter_by(publication_id=publication_id).delete()
+
+            # Delete audit trail entries
+            PublicationAuditTrail.query.filter_by(publication_id=publication_id).delete()
+
+            # Finally delete the publication itself
+            db.session.delete(publication)
+            db.session.commit()
+
+            logger.info(f"Publication deleted successfully: ID={publication_id}, Title='{publication_title}', User={user_id}")
+
+            return jsonify({
+                'message': 'Publication deleted successfully',
+                'publication_id': publication_id
+            }), 200
+
+        except Exception as delete_error:
+            db.session.rollback()
+            logger.error(f"Error during cascade deletion for publication {publication_id}: {str(delete_error)}")
+            raise delete_error
+
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting publication {publication_id}: {str(e)}")
+        return jsonify({'error': 'Failed to delete publication'}), 500
+
+
+# ===== VERSIONING ENDPOINTS =====
+
+@publications_bp.route('/my-docids/<int:user_id>', methods=['GET'])
+def get_my_docids(user_id):
+    """
+    Get all published DOCiDs for a user (for parent selector dropdown in version-docid page)
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+        description: User ID
+    responses:
+      200:
+        description: List of user's DOCiDs
+    """
+    try:
+        publications = Publications.query.filter_by(user_id=user_id).order_by(Publications.published.desc()).all()
+
+        docid_list = []
+        for publication in publications:
+            docid_list.append({
+                'id': publication.id,
+                'document_docid': publication.document_docid,
+                'document_title': publication.document_title,
+                'version_number': publication.version_number,
+                'published': publication.published.isoformat() if publication.published else None
+            })
+
+        return jsonify(docid_list), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching DOCiDs for user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to fetch DOCiDs'}), 500
+
+
+@publications_bp.route('/versions/<int:publication_id>', methods=['GET'])
+def get_publication_versions(publication_id):
+    """
+    Get version chain for a publication (parent + all versions)
+    ---
+    tags:
+      - Publications
+    parameters:
+      - name: publication_id
+        in: path
+        type: integer
+        required: true
+        description: Publication ID (can be parent or any version)
+    responses:
+      200:
+        description: Version chain with parent and all versions
+      404:
+        description: Publication not found
+    """
+    try:
+        publication = Publications.query.get(publication_id)
+        if not publication:
+            return jsonify({'error': 'Publication not found'}), 404
+
+        # Resolve to root parent (walk up if this is a version itself)
+        root_parent = publication
+        if publication.parent_id:
+            root_parent = Publications.query.get(publication.parent_id)
+            if not root_parent:
+                root_parent = publication  # parent was deleted, treat as standalone
+
+        # Get all versions of the root parent
+        version_records = Publications.query.filter_by(parent_id=root_parent.id).order_by(Publications.version_number.asc()).all()
+
+        parent_data = {
+            'id': root_parent.id,
+            'document_docid': root_parent.document_docid,
+            'document_title': root_parent.document_title,
+            'version_number': root_parent.version_number or 1,
+            'published': root_parent.published.isoformat() if root_parent.published else None
+        }
+
+        versions_data = []
+        for version_record in version_records:
+            versions_data.append({
+                'id': version_record.id,
+                'document_docid': version_record.document_docid,
+                'document_title': version_record.document_title,
+                'version_number': version_record.version_number,
+                'published': version_record.published.isoformat() if version_record.published else None
+            })
+
+        return jsonify({
+            'parent': parent_data,
+            'versions': versions_data,
+            'total_versions': len(versions_data) + 1  # including parent
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching versions for publication {publication_id}: {str(e)}")
+        return jsonify({'error': 'Failed to fetch versions'}), 500
+
+
+@publications_bp.route('/version', methods=['POST'])
+def create_version():
+    """
+    Create a new version of an existing publication.
+    Mirrors /publish but requires parentId and auto-computes version_number.
+    ---
+    tags:
+      - Publications
+    consumes:
+      - multipart/form-data
+    parameters:
+      - name: parentId
+        in: formData
+        type: integer
+        required: true
+        description: Publication ID of the parent DOCiD to version
+      - name: documentDocid
+        in: formData
+        type: string
+        required: true
+        description: New unique identifier for this version
+      - name: documentTitle
+        in: formData
+        type: string
+        required: true
+      - name: documentDescription
+        in: formData
+        type: string
+        required: true
+      - name: resourceType
+        in: formData
+        type: string
+        required: true
+      - name: user_id
+        in: formData
+        type: integer
+        required: true
+      - name: owner
+        in: formData
+        type: string
+        required: true
+    responses:
+      200:
+        description: Version created successfully
+      400:
+        description: Missing required fields
+      403:
+        description: Not authorized to version this DOCiD
+      404:
+        description: Parent publication not found
+      500:
+        description: Server error
+    """
+    try:
+        logger.info(f"=== START: Create Version Request at {datetime.now()} ===")
+
+        # --- Extract parent_id ---
+        parent_id_str = request.form.get('parentId')
+        if not parent_id_str:
+            return jsonify({'message': 'Missing required field: parentId'}), 400
+
+        try:
+            parent_id = int(parent_id_str)
+        except ValueError:
+            return jsonify({'message': 'parentId must be an integer'}), 400
+
+        # --- Validate parent exists ---
+        parent_publication = Publications.query.get(parent_id)
+        if not parent_publication:
+            return jsonify({'message': f'Parent publication {parent_id} not found'}), 404
+
+        # --- Extract and validate common fields ---
+        document_docid = request.form.get('documentDocid')
+        document_title = request.form.get('documentTitle')
+        document_description = request.form.get('documentDescription')
+        resource_type = request.form.get('resourceType')
+        user_id = request.form.get('user_id')
+        doi = clean_undefined_string(request.form.get('doi'))
+        owner = request.form.get('owner')
+        publication_poster = request.files.get('publicationPoster')
+        avatar = clean_undefined_string(request.form.get('avatar'))
+
+        missing_fields = []
+        if not document_docid:
+            missing_fields.append('documentDocid')
+        if not document_title:
+            missing_fields.append('documentTitle')
+        if not document_description:
+            missing_fields.append('documentDescription')
+        if not resource_type:
+            missing_fields.append('resourceType')
+        if not user_id:
+            missing_fields.append('user_id')
+        if not owner:
+            missing_fields.append('owner')
+
+        if missing_fields:
+            return jsonify({'message': f'Missing required fields: {", ".join(missing_fields)}'}), 400
+
+        try:
+            resource_type = int(resource_type)
+        except ValueError:
+            return jsonify({'message': f"Invalid resource type '{resource_type}'."}), 400
+
+        resource_type_obj = ResourceTypes.query.filter_by(id=resource_type).first()
+        if not resource_type_obj:
+            return jsonify({'message': f"Invalid resource type '{resource_type}'."}), 400
+        resource_type_id = resource_type_obj.id
+
+        try:
+            user_id = int(user_id)
+        except ValueError:
+            return jsonify({'message': f"Invalid user id '{user_id}'."}), 400
+
+        user = UserAccount.query.filter_by(user_id=user_id).first()
+        if not user:
+            return jsonify({'message': f"Invalid user '{user_id}'."}), 400
+
+        # --- Owner check: only parent owner can create versions ---
+        if parent_publication.user_id != user_id:
+            logger.warning(f"User {user_id} attempted to version publication {parent_id} owned by user {parent_publication.user_id}")
+            return jsonify({'message': 'You can only create versions of your own DOCiDs'}), 403
+
+        # --- Resolve root parent (flat chain: all versions point to original v1) ---
+        root_parent_id = parent_id
+        if parent_publication.parent_id:
+            root_parent_id = parent_publication.parent_id
+            logger.info(f"Resolved to root parent: {root_parent_id} (selected parent {parent_id} is itself a version)")
+
+        # --- Auto-compute version number ---
+        max_version = db.session.query(func.max(Publications.version_number)).filter_by(parent_id=root_parent_id).scalar() or 0
+        # Also check root parent's own version_number
+        root_parent = Publications.query.get(root_parent_id)
+        if root_parent and root_parent.version_number and root_parent.version_number > max_version:
+            max_version = root_parent.version_number
+        new_version_number = max(max_version, 1) + 1
+
+        logger.info(f"Versioning publication {root_parent_id}: new version_number = {new_version_number}")
+
+        # --- Backfill parent version_number if null ---
+        if root_parent and root_parent.version_number is None:
+            root_parent.version_number = 1
+            logger.info(f"Backfilled root parent {root_parent_id} with version_number=1")
+
+        # --- Handle file uploads ---
+        publication_poster_url = None
+        if publication_poster:
+            poster_filename = publication_poster.filename
+            publication_poster.save(f'uploads/{poster_filename}')
+            base_url = 'https://docid.africapidalliance.org'
+            publication_poster_url = f'{base_url}/uploads/{poster_filename}'
+
+        # --- Create the versioned publication record ---
+        publication = Publications(
+            user_id=user_id,
+            document_docid=document_docid,
+            document_title=document_title,
+            document_description=document_description,
+            owner=owner,
+            doi='',  # New versions don't inherit DOI — assigned independently later
+            resource_type_id=resource_type_id,
+            avatar=avatar,
+            publication_poster_url=publication_poster_url,
+            parent_id=root_parent_id,
+            version_number=new_version_number
+        )
+        db.session.add(publication)
+        db.session.flush()
+        publication_id = publication.id
+        logger.info(f"Version publication created with ID: {publication_id}")
+
+        # Schedule CORDRA push (new version gets its own handle)
+        try:
+            from app.tasks import push_to_cordra_async
+            push_to_cordra_async.apply_async(args=[publication_id], countdown=60)
+            logger.info(f"Scheduled CORDRA push for version publication {publication_id}")
+        except ImportError:
+            logger.warning("Celery not configured. CORDRA push will need manual run")
+
+        # --- Save sub-entities (same as /publish) ---
+
+        # Save PublicationFiles records
+        files_publications = []
+        index = 0
+        while True:
+            file_title = request.form.get(f'filesPublications[{index}][title]')
+            if file_title is None:
+                break
+
+            file_description = clean_undefined_string(request.form.get(f'filesPublications[{index}][description]'))
+            publication_type = request.form.get(f'filesPublications[{index}][publication_type]')
+            file_type = request.form.get(f'filesPublications[{index}][file_type]')
+            identifier = request.form.get(f'filesPublications[{index}][identifier]')
+            generated_identifier = request.form.get(f'filesPublications[{index}][generated_identifier]')
+            file = request.files.get(f'filesPublications_{index}_file')
+
+            file_url = ''
+            if file:
+                filename = file.filename
+                file.save(f'uploads/{filename}')
+                base_url = 'https://docid.africapidalliance.org'
+                file_url = f'{base_url}/uploads/{filename}'
+
+            pub_file = PublicationFiles(
+                publication_id=publication_id,
+                title=file_title,
+                description=file_description or '',
+                publication_type_id=int(publication_type) if publication_type else 1,
+                file_name=file.filename if file else '',
+                file_type=file_type or '',
+                file_url=file_url,
+                identifier=identifier or '',
+                generated_identifier=generated_identifier or ''
+            )
+            db.session.add(pub_file)
+            files_publications.append(pub_file)
+            index += 1
+
+        # Save PublicationDocuments records
+        files_documents = []
+        index = 0
+        while True:
+            doc_title = request.form.get(f'filesDocuments[{index}][title]')
+            if doc_title is None:
+                break
+
+            doc_description = clean_undefined_string(request.form.get(f'filesDocuments[{index}][description]'))
+            doc_type = request.form.get(f'filesDocuments[{index}][publication_type]')
+            doc_identifier = request.form.get(f'filesDocuments[{index}][identifier]')
+            doc_generated_identifier = request.form.get(f'filesDocuments[{index}][generated_identifier]')
+            doc_rrid = (request.form.get(f'filesDocuments[{index}][rrid]') or '').strip() or None
+            doc_file = request.files.get(f'filesDocuments_{index}_file')
+
+            doc_file_url = ''
+            if doc_file:
+                doc_filename = doc_file.filename
+                doc_file.save(f'uploads/{doc_filename}')
+                base_url = 'https://docid.africapidalliance.org'
+                doc_file_url = f'{base_url}/uploads/{doc_filename}'
+
+            pub_doc = PublicationDocuments(
+                publication_id=publication_id,
+                title=doc_title,
+                description=doc_description or '',
+                publication_type_id=int(doc_type) if doc_type else 1,
+                file_url=doc_file_url,
+                identifier_type_id=int(doc_identifier) if doc_identifier else None,
+                generated_identifier=doc_generated_identifier or '',
+                rrid=doc_rrid
+            )
+            db.session.add(pub_doc)
+            files_documents.append(pub_doc)
+            index += 1
+
+        # Save Creators
+        index = 0
+        while True:
+            creator_family = request.form.get(f'creators[{index}][family_name]')
+            if creator_family is None:
+                break
+
+            creator_given = request.form.get(f'creators[{index}][given_name]')
+            creator_identifier = clean_undefined_string(request.form.get(f'creators[{index}][orcid_id]'))
+            creator_identifier_type = clean_undefined_string(request.form.get(f'creators[{index}][identifier]'))
+            creator_role = request.form.get(f'creators[{index}][role]')
+
+            creator = PublicationCreators(
+                publication_id=publication_id,
+                family_name=creator_family,
+                given_name=creator_given or '',
+                identifier=creator_identifier or '',
+                identifier_type=creator_identifier_type or '',
+                role_id=creator_role or ''
+            )
+            db.session.add(creator)
+            index += 1
+
+        # Save Organizations (ROR)
+        index = 0
+        while True:
+            org_name = request.form.get(f'organizationRor[{index}][name]')
+            if org_name is None:
+                break
+
+            org = PublicationOrganization(
+                publication_id=publication_id,
+                name=org_name,
+                type=request.form.get(f'organizationRor[{index}][type]') or '',
+                other_name=clean_undefined_string(request.form.get(f'organizationRor[{index}][other_name]')) or '',
+                country=request.form.get(f'organizationRor[{index}][country]') or '',
+                identifier=clean_undefined_string(request.form.get(f'organizationRor[{index}][ror_id]')) or '',
+                identifier_type='ror',
+                rrid=(request.form.get(f'organizationRor[{index}][rrid]') or '').strip() or None
+            )
+            db.session.add(org)
+            index += 1
+
+        # Save Organizations (ISNI)
+        index = 0
+        while True:
+            org_name = request.form.get(f'organizationIsni[{index}][name]')
+            if org_name is None:
+                break
+
+            org = PublicationOrganization(
+                publication_id=publication_id,
+                name=org_name,
+                type=request.form.get(f'organizationIsni[{index}][type]') or '',
+                other_name=clean_undefined_string(request.form.get(f'organizationIsni[{index}][other_name]')) or '',
+                country=request.form.get(f'organizationIsni[{index}][country]') or '',
+                identifier=clean_undefined_string(request.form.get(f'organizationIsni[{index}][isni_id]')) or '',
+                identifier_type='isni',
+                rrid=(request.form.get(f'organizationIsni[{index}][rrid]') or '').strip() or None
+            )
+            db.session.add(org)
+            index += 1
+
+        # Save Organizations (Ringgold)
+        index = 0
+        while True:
+            org_name = request.form.get(f'organizationRinggold[{index}][name]')
+            if org_name is None:
+                break
+
+            org = PublicationOrganization(
+                publication_id=publication_id,
+                name=org_name,
+                type=request.form.get(f'organizationRinggold[{index}][type]') or '',
+                other_name=clean_undefined_string(request.form.get(f'organizationRinggold[{index}][other_name]')) or '',
+                country=request.form.get(f'organizationRinggold[{index}][country]') or '',
+                identifier=clean_undefined_string(request.form.get(f'organizationRinggold[{index}][ringgold_id]')) or '',
+                identifier_type='ringgold',
+                rrid=(request.form.get(f'organizationRinggold[{index}][rrid]') or '').strip() or None
+            )
+            db.session.add(org)
+            index += 1
+
+        # Save Funders
+        index = 0
+        while True:
+            funder_name = request.form.get(f'funders[{index}][name]')
+            if funder_name is None:
+                break
+
+            funder = PublicationFunders(
+                publication_id=publication_id,
+                name=funder_name,
+                type=request.form.get(f'funders[{index}][type]') or '',
+                funder_type_id=int(request.form.get(f'funders[{index}][type]') or 1),
+                other_name=clean_undefined_string(request.form.get(f'funders[{index}][other_name]')) or '',
+                country=request.form.get(f'funders[{index}][country]') or '',
+                identifier=clean_undefined_string(request.form.get(f'funders[{index}][ror_id]')) or '',
+                identifier_type='ror'
+            )
+            db.session.add(funder)
+            index += 1
+
+        # Save Projects
+        index = 0
+        while True:
+            project_title = request.form.get(f'projects[{index}][title]')
+            if project_title is None:
+                break
+
+            project_description = clean_undefined_string(request.form.get(f'projects[{index}][description]'))
+            project_raid_id = clean_undefined_string(request.form.get(f'projects[{index}][raid_id]'))
+
+            project = PublicationProjects(
+                publication_id=publication_id,
+                title=project_title,
+                description=project_description or '',
+                raid_id=project_raid_id or '',
+                identifier=project_raid_id or '',
+                identifier_type='raid' if project_raid_id else ''
+            )
+            db.session.add(project)
+            index += 1
+
+        # Save Research Resources (RRIDs)
+        index = 0
+        while True:
+            rrid_value = request.form.get(f'researchResources[{index}][rrid]')
+            if rrid_value is None:
+                break
+
+            rrid_name = request.form.get(f'researchResources[{index}][rrid_name]')
+            rrid_description = clean_undefined_string(request.form.get(f'researchResources[{index}][rrid_description]'))
+            rrid_resource_type = request.form.get(f'researchResources[{index}][rrid_resource_type]')
+            rrid_url = request.form.get(f'researchResources[{index}][rrid_url]')
+            resolved_json_str = request.form.get(f'researchResources[{index}][resolved_json]')
+
+            resolved_json = None
+            if resolved_json_str:
+                try:
+                    resolved_json = json.loads(resolved_json_str)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            rrid_record = DocidRrid(
+                entity_type='publication',
+                entity_id=publication_id,
+                rrid=rrid_value,
+                rrid_name=rrid_name,
+                rrid_description=rrid_description,
+                rrid_resource_type=rrid_resource_type,
+                rrid_url=rrid_url,
+                resolved_json=resolved_json,
+                last_resolved_at=datetime.utcnow(),
+            )
+            db.session.add(rrid_record)
+            index += 1
+
+        # Commit all changes
+        db.session.commit()
+
+        logger.info(f"=== SUCCESS: Version {new_version_number} created for parent {root_parent_id} with publication ID: {publication_id} ===")
+
+        return jsonify({
+            'message': 'Version created successfully',
+            'publication_id': publication_id,
+            'parent_id': root_parent_id,
+            'version_number': new_version_number,
+            'document_docid': publication.document_docid
+        }), 200
+
+    except Exception as e:
+        logger.error(f"=== ERROR: Failed to create version ===")
+        logger.error(f"Error: {str(e)}", exc_info=True)
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
