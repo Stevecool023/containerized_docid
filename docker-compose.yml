@@ -28,6 +28,7 @@ services:
   #   # or (works even if Flask CLI does not list seed-db yet):
   #   docker compose exec containerized_docid_backend python seed_reference_data.py
   # (create-db + stamp skips migration data; seed fills account_types + resource_types.)
+  # Do not run `db-downgrade` on prod unless you intend to undo migrations (can drop tables / data).
   # Optional harvest: docker compose exec containerized_docid_backend python seed_harvest_sources.py
   containerized_docid_backend:
     build:

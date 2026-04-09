@@ -1,3 +1,6 @@
+import subprocess
+import sys
+
 from app import create_app, db, migrate
 import click
 
@@ -51,5 +54,12 @@ def db_downgrade(revision):
     print(f'Database downgraded to {revision}.')
 
 if __name__ == '__main__':
-    # app.run(debug=False, port=5001)
-    app.run(debug=True, port=5001)  # Start the server on port 50001
+    # `python run.py seed-db` does NOT call Click/Flask CLI unless we forward argv.
+    # Wrong: python run.py create-db  (old behavior: ignored argv and only ran app.run)
+    if len(sys.argv) > 1:
+        raise SystemExit(
+            subprocess.call(
+                [sys.executable, '-m', 'flask', '--app', 'run:app', *sys.argv[1:]]
+            )
+        )
+    app.run(debug=True, port=5001)
