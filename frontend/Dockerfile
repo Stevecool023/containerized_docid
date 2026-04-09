@@ -5,12 +5,12 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 
-# Build-time env for Next.js (must be set when building the image)
+# Build-time env for Next.js (must be set when building the image).
+# Next.js embeds these into the server bundle — pass Docker Compose build args, not only runtime env.
 ARG NEXT_PUBLIC_API_BASE_URL
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
 
-# Server-side API routes read this at build time (Next inlines env). Set the same
-# value at runtime in compose; without it here, the bundle keeps the fallback URL.
+# Flask base URL including /api/v1. In Compose, use the backend service name (see docker-compose build args).
 ARG BACKEND_API_URL=http://127.0.0.1:5001/api/v1
 ENV BACKEND_API_URL=$BACKEND_API_URL
 

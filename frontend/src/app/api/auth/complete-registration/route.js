@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
+import { BACKEND_API_URL } from '@/lib/backendUrl';
 
 export async function POST(request) {
   try {
@@ -8,14 +9,14 @@ export async function POST(request) {
     try {
       // First, verify the registration token
       await axios.post(
-        `${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/complete-registration`,
+        `${BACKEND_API_URL}/auth/complete-registration`,
         { token, email }
       );
     } catch (error) {
       // If token verification fails or user not found, proceed with registration
       if (error.response?.data || error.message === "User not found") {
         const registrationResponse = await axios.post(
-          `${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/register`,
+          `${BACKEND_API_URL}/auth/register`,
           {
             social_id: "",
             full_name: name,

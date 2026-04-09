@@ -21,10 +21,10 @@ const PreFooter = () => {
   const theme = useTheme();
   
   const socialLinks = [
-    { icon: <Facebook />, url: 'https://docid.africapidalliance.org/#', label: 'Facebook', color: '#1877F2' },
-    { icon: <Twitter />, url: 'https://docid.africapidalliance.org/#', label: 'X (Twitter)', color: '#1DA1F2' },
-    { icon: <Instagram />, url: 'https://docid.africapidalliance.org/#', label: 'Instagram', color: '#E4405F' },
-    { icon: <LinkedIn />, url: 'https://docid.africapidalliance.org/#', label: 'LinkedIn', color: '#0A66C2' }
+    { icon: <Facebook />, url: 'https://docid-demo.africapidalliance.org/#', label: 'Facebook', color: '#1877F2' },
+    { icon: <Twitter />, url: 'https://docid-demo.africapidalliance.org/#', label: 'X (Twitter)', color: '#1DA1F2' },
+    { icon: <Instagram />, url: 'https://docid-demo.africapidalliance.org/#', label: 'Instagram', color: '#E4405F' },
+    { icon: <LinkedIn />, url: 'https://docid-demo.africapidalliance.org/#', label: 'LinkedIn', color: '#0A66C2' }
   ];
 
   const usefulLinks = [

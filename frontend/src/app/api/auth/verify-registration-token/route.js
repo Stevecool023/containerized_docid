@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { BACKEND_API_URL } from '@/lib/backendUrl';
 
 export async function GET(request) {
   try {
@@ -12,8 +13,7 @@ export async function GET(request) {
       );
     }
 
-    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
-    const response = await fetch(`${baseUrl}/auth/verify-registration-token/${token}`, {
+    const response = await fetch(`${BACKEND_API_URL}/auth/verify-registration-token/${token}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
