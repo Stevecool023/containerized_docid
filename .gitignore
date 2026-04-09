@@ -32,12 +32,12 @@ wheels/
 # Flask
 instance/
 .webassets-cache
-.env
+# .env files are tracked for containerized prod (use .env.local for machine-only overrides)
 .env.local
+.env.*.local
 *.db
 *.sqlite
 backend/temp/
-backend/.env
 backend/uploads/
 
 # Node
