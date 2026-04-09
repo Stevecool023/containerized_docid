@@ -21,6 +21,11 @@ const nextConfig = {
   },
   async rewrites() {
     return [
+      // Browser or cached bundles may still call /api/v1/auth/* (Flask path). Map to Next proxies.
+      {
+        source: '/api/v1/auth/:path*',
+        destination: '/api/auth/:path*',
+      },
       {
         // Properly handle DOCiD identifiers with slashes
         source: '/docid/:slug*',
