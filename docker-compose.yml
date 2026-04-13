@@ -43,8 +43,8 @@ services:
       DATABASE_URL: postgresql://docid_core_admin:Xkq7zaXVLI@docid_core_postgres:5432/docid_core_db
       CELERY_BROKER_URL: redis://docid_core_redis:6379/0
     ports:
-      # Host 5002 avoids clash with main stack on 5001; in-container port stays 5001
-      - "5002:5001"
+      # Host 5001 maps to the app listening on 5001 inside the container
+      - "5001:5001"
     depends_on:
       docid_core_postgres:
         condition: service_healthy
