@@ -53,7 +53,7 @@ playwright.config.js
 
 
 # 1) Create all tables from SQLAlchemy models (required before registration works)
-docker compose exec containerized_docid_backend flask --app run:app create-db
+docker compose exec docid_core_backend flask --app run:app create-db
 
 # 2) Align Alembic with that schema (recommended after create-db; avoids later "upgrade" weirdness)
-docker compose exec containerized_docid_backend flask --app run:app db stamp head
+docker compose exec docid_core_backend flask --app run:app db stamp head

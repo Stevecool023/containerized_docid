@@ -48,8 +48,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Same host as APPLICATION_BASE_URL in .env (e.g. docid-demo deployment)
-APPLICATION_DOMAIN = os.getenv("APPLICATION_BASE_URL", "https://docid-demo.africapidalliance.org").rstrip("/")
+# Same host as APPLICATION_BASE_URL in .env (e.g. docid-core deployment)
+APPLICATION_DOMAIN = os.getenv("APPLICATION_BASE_URL", "https://docid-core.africapidalliance.org").rstrip("/")
 
 def fix_file_url(url):
     """Fix file URLs to use the correct domain instead of localhost or any other domain"""

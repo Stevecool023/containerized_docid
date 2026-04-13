@@ -1,6 +1,6 @@
 /**
  * Flask API base URL for Next.js server-side routes (API route handlers).
- * In Docker, set BACKEND_API_URL as a **Compose build arg** (see docker-compose.yml). Next.js
+ * In Docker, set BACKEND_API_URL as a **Compose build arg** (e.g. http://docid_core_backend:5001/api/v1). Next.js
  * inlines server env at `next build`; `.env*` files are not in the image (see .dockerignore).
  */
 export const BACKEND_API_URL = (

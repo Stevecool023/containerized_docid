@@ -1,80 +1,80 @@
-# DOCiD containerized stack (containerized_docid) — can run beside main DOCiD on the same host using different published ports.
+# DOCiD Core stack (docid_core) — can run beside main DOCiD on the same host using different published ports.
 services:
-  containerized_docid_postgres:
+  docid_core_postgres:
     image: postgres:15-alpine
-    container_name: containerized_docid_postgres
+    container_name: docid_core_postgres
     environment:
-      POSTGRES_USER: containerized_docid_admin
+      POSTGRES_USER: docid_core_admin
       POSTGRES_PASSWORD: Xkq7zaXVLI
-      POSTGRES_DB: containerized_docid_db
+      POSTGRES_DB: docid_core_db
     volumes:
-      - containerized_docid_postgres_data:/var/lib/postgresql/data
+      - docid_core_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U containerized_docid_admin -d containerized_docid_db"]
+      test: ["CMD-SHELL", "pg_isready -U docid_core_admin -d docid_core_db"]
       interval: 5s
       timeout: 5s
       retries: 5
 
 
-  containerized_docid_redis:
+  docid_core_redis:
     image: redis:7-alpine
-    container_name: containerized_docid_redis
+    container_name: docid_core_redis
 
 
   # First-time DB (empty postgres volume):
-  #   docker compose exec containerized_docid_backend flask --app run:app create-db
-  #   docker compose exec containerized_docid_backend flask --app run:app db stamp head
-  #   docker compose exec containerized_docid_backend flask --app run:app seed-db
+  #   docker compose exec docid_core_backend flask --app run:app create-db
+  #   docker compose exec docid_core_backend flask --app run:app db stamp head
+  #   docker compose exec docid_core_backend flask --app run:app seed-db
   #   # or (works even if Flask CLI does not list seed-db yet):
-  #   docker compose exec containerized_docid_backend python seed_reference_data.py
+  #   docker compose exec docid_core_backend python seed_reference_data.py
   # (create-db + stamp skips migration data; seed fills account_types + resource_types.)
   # Do not run `db-downgrade` on prod unless you intend to undo migrations (can drop tables / data).
-  # Optional harvest: docker compose exec containerized_docid_backend python seed_harvest_sources.py
-  containerized_docid_backend:
+  # Optional harvest: docker compose exec docid_core_backend python seed_harvest_sources.py
+  docid_core_backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: containerized_docid_backend
+    container_name: docid_core_backend
     env_file:
       - ./backend/.env
     environment:
-      # Must match containerized_docid_postgres above (hostname = Compose service name)
-      DATABASE_URL: postgresql://containerized_docid_admin:Xkq7zaXVLI@containerized_docid_postgres:5432/containerized_docid_db
-      CELERY_BROKER_URL: redis://containerized_docid_redis:6379/0
+      # Must match docid_core_postgres above (hostname = Compose service name)
+      DATABASE_URL: postgresql://docid_core_admin:Xkq7zaXVLI@docid_core_postgres:5432/docid_core_db
+      CELERY_BROKER_URL: redis://docid_core_redis:6379/0
     ports:
       # Host 5002 avoids clash with main stack on 5001; in-container port stays 5001
       - "5002:5001"
     depends_on:
-      containerized_docid_postgres:
+      docid_core_postgres:
         condition: service_healthy
-      containerized_docid_redis:
+      docid_core_redis:
         condition: service_started
 
 
-  containerized_docid_frontend:
+  docid_core_frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
         # Quote defaults: unquoted https:// breaks YAML (colon).
-        NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-https://docid-demo.africapidalliance.org/api/v1}"
-        BACKEND_API_URL: "${BACKEND_API_URL:-http://containerized_docid_backend:5001/api/v1}"
-    container_name: containerized_docid_frontend
+        NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-https://docid-core.africapidalliance.org/api/v1}"
+        BACKEND_API_URL: "${BACKEND_API_URL:-http://docid_core_backend:5001/api/v1}"
+    container_name: docid_core_frontend
     # Next.js in Docker does not auto-load frontend/.env.production; inject it here.
     # (Compose only reads repo-root .env for ${VAR} substitution, not this path.)
     env_file:
       - ./frontend/.env.production
     environment:
       # Overrides env_file: reach backend by service name inside the stack
-      BACKEND_API_URL: http://containerized_docid_backend:5001/api/v1
+      BACKEND_API_URL: http://docid_core_backend:5001/api/v1
       # Registration/reset links (URL the user's browser can open)
-      NEXT_PUBLIC_BASE_URL: "${NEXT_PUBLIC_BASE_URL:-https://docid-demo.africapidalliance.org}"
+      NEXT_PUBLIC_BASE_URL: "${NEXT_PUBLIC_BASE_URL:-https://docid-core.africapidalliance.org}"
     ports:
       # Host 3001 avoids clash with main stack on 3000; in-container port stays 3000
       - "3001:3000"
     depends_on:
-      - containerized_docid_backend
+      - docid_core_backend
 
 
 volumes:
-  containerized_docid_postgres_data:
+  docid_core_postgres_data:
