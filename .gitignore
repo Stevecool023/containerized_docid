@@ -32,7 +32,7 @@ wheels/
 # Flask
 instance/
 .webassets-cache
-# .env files are tracked for containerized prod (use .env.local for machine-only overrides)
+# .env files are tracked for docid-core Docker prod (use .env.local for machine-only overrides)
 .env.local
 .env.*.local
 *.db

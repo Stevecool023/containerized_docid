@@ -1,4 +1,5 @@
-# DOCiD Core stack (docid_core) — can run beside main DOCiD on the same host using different published ports.
+name: docid_core
+
 services:
   docid_core_postgres:
     image: postgres:15-alpine
