@@ -32,7 +32,6 @@ wheels/
 # Flask
 instance/
 .webassets-cache
-# .env files are tracked for docid-core Docker prod (use .env.local for machine-only overrides)
 .env.local
 .env.*.local
 *.db
@@ -40,6 +39,7 @@ instance/
 backend/temp/
 backend/uploads/
 frontend/.env.production
+backend/.env
 
 # Node
 node_modules/
