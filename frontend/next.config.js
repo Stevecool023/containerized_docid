@@ -1,30 +1,25 @@
 /** @type {import('next').NextConfig} */
+const remoteImageHosts = (process.env.NEXT_IMAGE_REMOTE_HOSTS || 'localhost')
+  .split(',')
+  .map((host) => host.trim())
+  .filter(Boolean);
+
 const nextConfig = {
-  distDir: '.next',
   output: 'standalone',
+  distDir: '.next',
   reactStrictMode: true,
   images: {
-    // Serve original URLs (no /_next/image optimizer) — matches standalone Docker runner
-    unoptimized: true,
-    remotePatterns: [
-      {
-        protocol: 'http',
-        hostname: 'localhost',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'localhost',
-        pathname: '/**',
-      },
-    ],
+    remotePatterns: remoteImageHosts.flatMap((hostname) => ([
+      { protocol: 'https', hostname },
+      { protocol: 'http', hostname },
+    ])),
   },
   async rewrites() {
     return [
-      // Browser or cached bundles may still call /api/v1/auth/* (Flask path). Map to Next proxies.
       {
-        source: '/api/v1/auth/:path*',
-        destination: '/api/auth/:path*',
+        // Keep browser traffic same-origin while serving backend uploads.
+        source: '/uploads/:path*',
+        destination: `${process.env.BACKEND_UPLOAD_ORIGIN || 'http://backend:5001'}/uploads/:path*`,
       },
       {
         // Properly handle DOCiD identifiers with slashes

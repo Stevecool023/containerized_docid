@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { BACKEND_API_URL } from '@/lib/backendUrl';
+import { getBackendApiV1BaseUrl } from '@/lib/apiBase';
 
 export async function GET() {
   try {
-    const response = await fetch(`${BACKEND_API_URL}/publications/get-list-resource-types`, {
+    const baseUrl = getBackendApiV1BaseUrl();
+    const response = await fetch(`${baseUrl}/publications/get-list-resource-types`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

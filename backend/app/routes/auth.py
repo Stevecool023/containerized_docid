@@ -1335,7 +1335,7 @@ def login():
                   example: "An error occurred during login."
     """
     try:
-        data = request.get_json(silent=True) or {}
+        data = request.json
         user_email = data.get("email")
         user_password = data.get("password")
 

@@ -1,20 +1,9 @@
-import subprocess
-import sys
-
 from app import create_app, db, migrate
+from app.models import UserAccount
+from flask.cli import with_appcontext
 import click
 
 app = create_app()
-
-
-@app.cli.command('seed-db')
-def seed_db():
-    """Seed reference rows missing after `create-db` + `db stamp` (migrations not applied). Idempotent."""
-    from seed_reference_data import seed_reference_tables
-
-    seed_reference_tables()
-    print('  Optional: python seed_harvest_sources.py  # harvest_sources / DSpace harvest config')
-
 
 @app.cli.command('create-db')
 def create_db():
@@ -54,15 +43,8 @@ def db_downgrade(revision):
     print(f'Database downgraded to {revision}.')
 
 if __name__ == '__main__':
-    # `python run.py seed-db` does NOT call Click/Flask CLI unless we forward argv.
-    # Wrong: python run.py create-db  (old behavior: ignored argv and only ran app.run)
-    if len(sys.argv) > 1:
-        raise SystemExit(
-            subprocess.call(
-                [sys.executable, '-m', 'flask', '--app', 'run:app', *sys.argv[1:]]
-            )
-        )
-    app.run(debug=True, port=5001)
-
-
-
+    app.run(
+        host='0.0.0.0',
+        port=int(__import__('os').getenv('FLASK_PORT', 5001)),
+        debug=__import__('os').getenv('FLASK_ENV', 'development') == 'development'
+    )

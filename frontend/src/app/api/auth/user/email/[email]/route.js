@@ -1,19 +1,20 @@
 import { NextResponse } from 'next/server';
-import { BACKEND_API_URL } from '@/lib/backendUrl';
+import { getBackendApiV1BaseUrl } from '@/lib/apiBase';
 
-export async function GET(request, { params }) {
+export async function GET(_request, { params }) {
   try {
-    const { email: emailSegment } = await params;
-    const email = decodeURIComponent(emailSegment);
-    const url = `${BACKEND_API_URL}/auth/user/email/${encodeURIComponent(email)}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const { email } = params;
+    const response = await fetch(
+      `${getBackendApiV1BaseUrl()}/auth/user/email/${encodeURIComponent(email)}`,
+      { method: 'GET', headers: { 'Content-Type': 'application/json' } },
+    );
+
     const data = await response.json().catch(() => ({}));
     return NextResponse.json(data, { status: response.status });
   } catch (error) {
-    console.error('auth/user/email proxy:', error);
-    return NextResponse.json({ message: 'Failed to fetch user' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch user by email', details: error.message },
+      { status: 500 },
+    );
   }
 }

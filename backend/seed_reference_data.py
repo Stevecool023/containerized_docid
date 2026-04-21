@@ -1,73 +1,60 @@
-#!/usr/bin/env python3
-"""
-Seed account_types and resource_types when the DB was created with create-db + db stamp
-(migration inserts never ran). Idempotent.
-
-Usage (inside backend container / venv):
-  python seed_reference_data.py
-
-Same logic as: flask --app run:app seed-db
-"""
-from sqlalchemy import text
-
 from app import create_app, db
-from app.models import AccountTypes, ResourceTypes
-
-_ACCOUNT_TYPE_SEEDS = [(1, 'Individual'), (2, 'Institutional')]
-_DATACITE_RESOURCE_TYPES = (
-    'Text',
-    'Dataset',
-    'Image',
-    'Audiovisual',
-    'Collection',
-    'Software',
-    'Other',
+from app.models import (
+    AccountTypes,
+    ResourceTypes,
+    FunderTypes,
+    PublicationTypes,
+    PublicationIdentifierTypes,
+    creatorsIdentifiers,
+    CreatorsRoles,
 )
 
 
-def seed_reference_tables() -> None:
-    for aid, name in _ACCOUNT_TYPE_SEEDS:
-        row = AccountTypes.query.filter_by(id=aid).first()
-        if row is None:
-            db.session.add(AccountTypes(id=aid, account_type_name=name))
-            print(f'  + account_types id={aid} {name!r}')
-        elif row.account_type_name != name:
-            print(f'  ! account_types id={aid}: expected {name!r}, has {row.account_type_name!r}')
+def _upsert(model, field_name, values):
+    for value in values:
+        exists = model.query.filter(getattr(model, field_name) == value).first()
+        if not exists:
+            db.session.add(model(**{field_name: value}))
+
+
+def _upsert_creator_roles():
+    roles = [
+        ("Author", "Author"),
+        ("CoAuthor", "Co-Author"),
+        ("Editor", "Editor"),
+        ("PrincipalInvestigator", "Principal Investigator"),
+    ]
+    for role_id, role_name in roles:
+        exists = CreatorsRoles.query.filter_by(role_id=role_id).first()
+        if not exists:
+            db.session.add(CreatorsRoles(role_id=role_id, role_name=role_name))
+
+
+def seed_reference_data():
+    _upsert(AccountTypes, "account_type_name", ["Individual", "Institutional"])
+    _upsert(
+        ResourceTypes,
+        "resource_type",
+        ["Article", "Dataset", "Software", "Image", "Video", "Other"],
+    )
+    _upsert(FunderTypes, "funder_type_name", ["Government", "Private", "Institutional"])
+    _upsert(
+        PublicationTypes,
+        "publication_type_name",
+        ["Main File", "Supplementary", "Preprint", "Versioned Update"],
+    )
+    _upsert(
+        PublicationIdentifierTypes,
+        "identifier_type_name",
+        ["DOI", "CSTR", "Handle", "ARK"],
+    )
+    _upsert(creatorsIdentifiers, "identifier_name", ["ORCID", "ISNI", "VIAF"])
+    _upsert_creator_roles()
     db.session.commit()
-
-    if db.engine.dialect.name == 'postgresql':
-        db.session.execute(
-            text(
-                "SELECT setval(pg_get_serial_sequence('account_types', 'id'), "
-                "COALESCE((SELECT MAX(id) FROM account_types), 1))"
-            )
-        )
-        db.session.commit()
-
-    for rt_name in _DATACITE_RESOURCE_TYPES:
-        if ResourceTypes.query.filter_by(resource_type=rt_name).first() is None:
-            db.session.add(ResourceTypes(resource_type=rt_name))
-            print(f'  + resource_types {rt_name!r}')
-    db.session.commit()
-
-    if db.engine.dialect.name == 'postgresql':
-        db.session.execute(
-            text(
-                "SELECT setval(pg_get_serial_sequence('resource_types', 'id'), "
-                "COALESCE((SELECT MAX(id) FROM resource_types), 1))"
-            )
-        )
-        db.session.commit()
-
-    print('seed_reference_data: finished (account_types + resource_types).')
+    print("Reference seed complete.")
 
 
-def main() -> None:
+if __name__ == "__main__":
     app = create_app()
     with app.app_context():
-        seed_reference_tables()
-        print('  Optional: python seed_harvest_sources.py')
-
-
-if __name__ == '__main__':
-    main()
+        seed_reference_data()

@@ -2,7 +2,6 @@ import axios from 'axios';
 import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
-import { BACKEND_API_URL } from '@/lib/backendUrl';
 //import smtpTransport from 'nodemailer-smtp-transport';
 
 //create transporter per-request to ensure env vars are loaded
@@ -50,7 +49,7 @@ export async function POST(request) {
         //console.log("Encoded Email:", encodedEmail);
 
         const checkEmailResponse = await axios.get(
-            `${BACKEND_API_URL}/auth/user/email/${encodedEmail}`
+            `${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/user/email/${encodedEmail}`
         );
 
         if(checkEmailResponse.data && checkEmailResponse.data.email === email){
@@ -80,7 +79,7 @@ export async function POST(request) {
     //Store registration token
     console.log("Storing registration token...");
     await axios.post(
-        `${BACKEND_API_URL}/auth/store-registration-token`,
+        `${process.env.NEXT_PUBLIC_API_BASE_URL}/auth/store-registration-token`,
         { email, token, expires_at: formattedExpiresAt }
     );
 
@@ -176,14 +175,7 @@ export async function POST(request) {
     );
 
   } catch (error) {
-    const status = error.response?.status;
-    const targetUrl = error.config?.url;
-    console.error(
-      'Error during registration:',
-      error.message,
-      status != null ? `HTTP ${status}` : '',
-      targetUrl ? `url=${targetUrl}` : ''
-    );
+    console.error('Error during registration:', error.message);
     return NextResponse.json(
       { status: false,
         message: 'Server error. Please try again.' },

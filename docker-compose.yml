@@ -1,0 +1,85 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    environment:
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_started
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=${FLASK_ENV:-production}
+      - DATABASE_URL=${DATABASE_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+      - UPLOADS_DIRECTORY=${UPLOADS_DIRECTORY:-/app/uploads}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    expose:
+      - "5001"
+    restart: unless-stopped
+
+  backend-bootstrap:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    env_file:
+      - .env.docker
+    environment:
+      - FLASK_APP=run.py
+      - DATABASE_URL=${DATABASE_URL}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "scripts/bootstrap_and_seed.sh"]
+    profiles: ["bootstrap"]
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-docid_db}
+      - POSTGRES_USER=${POSTGRES_USER:-docid}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-docid}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docid} -d ${POSTGRES_DB:-docid_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_uploads:
+  backend_logs:

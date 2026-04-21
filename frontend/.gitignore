@@ -30,11 +30,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# Local-only overrides (committed: .env.production, .env.development, .env)
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# env files (can opt-in for committing if needed)
+.env*
 
 # vercel
 .vercel
@@ -50,10 +47,3 @@ next-env.d.ts
 /playwright/.cache/
 e2e/
 playwright.config.js
-
-
-# 1) Create all tables from SQLAlchemy models (required before registration works)
-docker compose exec docid_core_backend flask --app run:app create-db
-
-# 2) Align Alembic with that schema (recommended after create-db; avoids later "upgrade" weirdness)
-docker compose exec docid_core_backend flask --app run:app db stamp head

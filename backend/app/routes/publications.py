@@ -57,6 +57,74 @@ def clean_undefined_string(value):
         return None
     return value
 
+
+def _build_rrid_cache(rrid_values):
+    """Return a {rrid_string: metadata_dict} lookup built in a single bulk query.
+
+    Searches across all entities — DocidRrid is used as a metadata cache so any
+    record with the same RRID string has equivalent SciCrunch metadata regardless
+    of which entity resolved it. Prefers rows that have rrid_name populated.
+
+    For any RRIDs not yet in the DB, performs lazy resolution via SciCrunch and
+    saves the result so subsequent requests are served from the DB cache.
+    Returns an empty dict when no RRIDs are provided or none are found.
+    """
+    unique_rrids = [r for r in set(rrid_values) if r]
+    if not unique_rrids:
+        return {}
+
+    cache = {}
+    found_rrids = set()
+    for record in DocidRrid.query.filter(DocidRrid.rrid.in_(unique_rrids)).all():
+        if record.rrid not in cache or record.rrid_name:
+            cache[record.rrid] = {
+                'rrid_name': record.rrid_name,
+                'rrid_description': record.rrid_description,
+                'rrid_resource_type': record.rrid_resource_type,
+                'rrid_url': record.rrid_url,
+            }
+        # Only treat as a valid cache hit if name is populated;
+        # empty-name records were cached by a broken normalizer and
+        # should be re-resolved on the next request.
+        if record.rrid_name:
+            found_rrids.add(record.rrid)
+
+    # Lazy-resolve any RRIDs that have no DB record yet (e.g. doc/org RRIDs entered
+    # as plain strings without going through the RRID form resolution flow).
+    missing_rrids = [r for r in unique_rrids if r not in found_rrids]
+    if missing_rrids:
+        from app.service_scicrunch import resolve_rrid as _resolve_rrid
+        for rrid_str in missing_rrids:
+            try:
+                resolved_result, resolve_error = _resolve_rrid(rrid_str)
+                if resolve_error is None and resolved_result:
+                    metadata = resolved_result.get('resolved', {})
+                    new_record = DocidRrid(
+                        entity_type='publication',
+                        entity_id=0,  # sentinel: global metadata cache entry
+                        rrid=rrid_str,
+                        rrid_name=metadata.get('name'),
+                        rrid_description=metadata.get('description'),
+                        rrid_resource_type=metadata.get('resource_type'),
+                        rrid_url=metadata.get('url'),
+                        resolved_json=metadata,
+                        last_resolved_at=datetime.utcnow(),
+                    )
+                    db.session.add(new_record)
+                    db.session.commit()
+                    cache[rrid_str] = {
+                        'rrid_name': metadata.get('name'),
+                        'rrid_description': metadata.get('description'),
+                        'rrid_resource_type': metadata.get('resource_type'),
+                        'rrid_url': metadata.get('url'),
+                    }
+                    logger.info(f"Lazy-resolved and cached RRID {rrid_str}")
+            except Exception as exc:
+                db.session.rollback()
+                logger.warning(f"Failed to lazy-resolve RRID {rrid_str}: {exc}")
+
+    return cache
+
 @publications_bp.route('/get-list-resource-types', methods=['GET'])
 # @jwt_required()
 def get_resource_types():
@@ -690,6 +758,11 @@ def get_publication(publication_id):
             } for file in data.publications_files
         ]
 
+        _rrid_cache = _build_rrid_cache(
+            [getattr(doc, 'rrid', None) for doc in data.publication_documents] +
+            [getattr(org, 'rrid', None) for org in data.publication_organizations]
+        )
+
         publication_dict['publication_documents'] = [
             {
                 'id': doc.id,
@@ -699,7 +772,8 @@ def get_publication(publication_id):
                 'file_url': doc.file_url,
                 'identifier': doc.identifier_type_id,
                 'generated_identifier': doc.generated_identifier,
-                'rrid': getattr(doc, 'rrid', None)
+                'rrid': getattr(doc, 'rrid', None),
+                **(_rrid_cache.get(doc.rrid) or {} if doc.rrid else {})
             } for doc in data.publication_documents
         ]
 
@@ -722,7 +796,8 @@ def get_publication(publication_id):
                 'country': org.country,
                 'identifier': org.identifier,
                 'identifier_type': org.identifier_type,
-                'rrid': getattr(org, 'rrid', None)
+                'rrid': getattr(org, 'rrid', None),
+                **(_rrid_cache.get(org.rrid) or {} if org.rrid else {})
             } for org in data.publication_organizations
         ]
 
@@ -865,6 +940,11 @@ def get_publication_by_docid_prefix():
             } for file in data.publications_files
         ]
 
+        _rrid_cache = _build_rrid_cache(
+            [getattr(doc, 'rrid', None) for doc in data.publication_documents] +
+            [getattr(org, 'rrid', None) for org in data.publication_organizations]
+        )
+
         publication_dict['publication_documents'] = [
             {
                 'id': doc.id,
@@ -874,7 +954,8 @@ def get_publication_by_docid_prefix():
                 'file_url': doc.file_url,
                 'identifier': doc.identifier_type_id,
                 'generated_identifier': doc.generated_identifier,
-                'rrid': getattr(doc, 'rrid', None)
+                'rrid': getattr(doc, 'rrid', None),
+                **(_rrid_cache.get(doc.rrid) or {} if doc.rrid else {})
             } for doc in data.publication_documents
         ]
 
@@ -897,7 +978,8 @@ def get_publication_by_docid_prefix():
                 'country': org.country,
                 'identifier': org.identifier,
                 'identifier_type': org.identifier_type,
-                'rrid': getattr(org, 'rrid', None)
+                'rrid': getattr(org, 'rrid', None),
+                **(_rrid_cache.get(org.rrid) or {} if org.rrid else {})
             } for org in data.publication_organizations
         ]
 
@@ -1047,6 +1129,11 @@ def get_publication_by_docid_simple(document_docid):
             } for file in data.publications_files
         ]
 
+        _rrid_cache = _build_rrid_cache(
+            [getattr(doc, 'rrid', None) for doc in data.publication_documents] +
+            [getattr(org, 'rrid', None) for org in data.publication_organizations]
+        )
+
         publication_dict['publication_documents'] = [
             {
                 'id': doc.id,
@@ -1056,7 +1143,8 @@ def get_publication_by_docid_simple(document_docid):
                 'file_url': doc.file_url,
                 'identifier': doc.identifier_type_id,
                 'generated_identifier': doc.generated_identifier,
-                'rrid': getattr(doc, 'rrid', None)
+                'rrid': getattr(doc, 'rrid', None),
+                **(_rrid_cache.get(doc.rrid) or {} if doc.rrid else {})
             } for doc in data.publication_documents
         ]
 
@@ -1079,7 +1167,8 @@ def get_publication_by_docid_simple(document_docid):
                 'country': org.country,
                 'identifier': org.identifier,
                 'identifier_type': org.identifier_type,
-                'rrid': getattr(org, 'rrid', None)
+                'rrid': getattr(org, 'rrid', None),
+                **(_rrid_cache.get(org.rrid) or {} if org.rrid else {})
             } for org in data.publication_organizations
         ]
 
@@ -1355,9 +1444,8 @@ def create_publication():
         publication_poster_url = None
         if publication_poster:
             poster_filename = publication_poster.filename
-            publication_poster.save(f'uploads/{poster_filename}')
-            # Always use production domain for consistency
-            base_url = 'https://docid.africapidalliance.org'
+            publication_poster.save(f'{Config.UPLOADS_DIRECTORY}/{poster_filename}')
+            base_url = Config.APPLICATION_BASE_URL.rstrip('/')
             publication_poster_url = f'{base_url}/uploads/{poster_filename}'
             logger.info(f"Publication poster saved: {publication_poster_url}")
 
@@ -1433,24 +1521,23 @@ def create_publication():
               
             publication_type_id = publication_type_obj.id
               
+            video_url = request.form.get(f'filesPublications[{index}][video_url]', '').strip()
             file_url = None
             file_filename = None
             handle_id = None
             external_id = None
             external_id_type = None
-            
+
             if file:
                 file_filename = file.filename
-                file.save(f'uploads/{file_filename}')
-                # Always use production domain for consistency
-                base_url = 'https://docid.africapidalliance.org'
+                file.save(f'{Config.UPLOADS_DIRECTORY}/{file_filename}')
+                base_url = Config.APPLICATION_BASE_URL.rstrip('/')
                 file_url = f'{base_url}/uploads/{file_filename}'
                 logger.info(f"File saved: {file_url}")
 
                 # Process the identifier
                 handle_id, external_id, external_id_type = IdentifierService.process_identifier(generated_identifier)
-                
-                # Only create PublicationFiles record if there's an actual file uploaded
+
                 files_publications.append(PublicationFiles(
                     publication_id=publication_id,
                     title=file_title,
@@ -1465,14 +1552,30 @@ def create_publication():
                     external_identifier=external_id,
                     external_identifier_type=external_id_type
                 ))
-                
+
                 # CORDRA push has been moved to separate script push_to_cordra.py
                 if handle_id:
                     logger.info(f"PublicationFile [{index}] has handle: {handle_id}. CORDRA push will be handled by push_to_cordra.py script")
                 else:
                     logger.warning(f"No Handle available for PublicationFile [{index}]")
+            elif video_url:
+                logger.info(f"PublicationFile [{index}] is an external video link: {video_url}")
+                files_publications.append(PublicationFiles(
+                    publication_id=publication_id,
+                    title=file_title,
+                    description=file_description,
+                    publication_type_id=publication_type_id,
+                    file_name='external_video',
+                    file_type='video/external',
+                    file_url=video_url,
+                    identifier=identifier or '', # type: ignore
+                    generated_identifier=generated_identifier or '',
+                    handle_identifier=None,
+                    external_identifier=None,
+                    external_identifier_type=None
+                ))
             else:
-                logger.warning(f"PublicationFile [{index}] has no file uploaded - skipping file record creation")
+                logger.warning(f"PublicationFile [{index}] has no file or video URL - skipping file record creation")
             
             index += 1
         
@@ -1552,39 +1655,56 @@ def create_publication():
           handle_id = None
           external_id = None
           external_id_type = None
-          
+          video_url = request.form.get(f'filesDocuments[{index}][video_url]', '').strip()
+
           if file:
               file_filename = file.filename
-              file.save(f'uploads/{file_filename}')
-              # Always use production domain for consistency
-              base_url = 'https://docid.africapidalliance.org'
+              file.save(f'{Config.UPLOADS_DIRECTORY}/{file_filename}')
+              base_url = Config.APPLICATION_BASE_URL.rstrip('/')
               file_url = f'{base_url}/uploads/{file_filename}'
               logger.info(f"File saved: {file_url}")
 
               # Process the identifier only if we have generated_identifier and a file
               if generated_identifier:
                   handle_id, external_id, external_id_type = IdentifierService.process_identifier(generated_identifier)
-              
-              # Only create PublicationDocuments record if there's an actual file uploaded
+
               files_documents.append(PublicationDocuments(
                   publication_id=publication_id,
                   title=file_title,
                   description=file_description,
                   publication_type_id=publication_type_id,
                   file_url=file_url,
-                  identifier_type_id=validated_identifier_type_id,  # Use validated value
+                  identifier_type_id=validated_identifier_type_id,
                   generated_identifier=generated_identifier,
                   handle_identifier=handle_id,
                   external_identifier=external_id,
                   external_identifier_type=external_id_type,
                   rrid=rrid_value
               ))
-              
+
               # CORDRA push has been moved to separate script push_to_cordra.py
               if handle_id:
                   logger.info(f"PublicationDocument [{index}] has handle: {handle_id}. CORDRA push will be handled by push_to_cordra.py script")
               else:
                   logger.warning(f"No Handle available for PublicationDocument [{index}]")
+          elif video_url:
+              logger.info(f"PublicationDocument [{index}] is an external video link: {video_url}")
+              file_url = video_url
+              if generated_identifier:
+                  handle_id, external_id, external_id_type = IdentifierService.process_identifier(generated_identifier)
+              files_documents.append(PublicationDocuments(
+                  publication_id=publication_id,
+                  title=file_title,
+                  description=file_description,
+                  publication_type_id=publication_type_id,
+                  file_url=file_url,
+                  identifier_type_id=validated_identifier_type_id,
+                  generated_identifier=generated_identifier,
+                  handle_identifier=handle_id,
+                  external_identifier=external_id,
+                  external_identifier_type=external_id_type,
+                  rrid=rrid_value
+              ))
           else:
               logger.warning(f"PublicationDocument [{index}] has no file uploaded - skipping document record creation")
           
@@ -2730,7 +2850,12 @@ def get_publication_for_edit(publication_id):
                 'external_identifier_type': getattr(file, 'external_identifier_type', None)
             } for file in data.publications_files
         ]
-        
+
+        _rrid_cache = _build_rrid_cache(
+            [getattr(doc, 'rrid', None) for doc in data.publication_documents] +
+            [getattr(org, 'rrid', None) for org in data.publication_organizations]
+        )
+
         publication_dict['publication_documents'] = [
             {
                 'id': doc.id,
@@ -2743,7 +2868,8 @@ def get_publication_for_edit(publication_id):
                 'handle_identifier': getattr(doc, 'handle_identifier', None),
                 'external_identifier': getattr(doc, 'external_identifier', None),
                 'external_identifier_type': getattr(doc, 'external_identifier_type', None),
-                'rrid': getattr(doc, 'rrid', None)
+                'rrid': getattr(doc, 'rrid', None),
+                **(_rrid_cache.get(doc.rrid) or {} if doc.rrid else {})
             } for doc in data.publication_documents
         ]
         
@@ -2767,7 +2893,8 @@ def get_publication_for_edit(publication_id):
                 'country': org.country,
                 'identifier': getattr(org, 'identifier', None),
                 'identifier_type': getattr(org, 'identifier_type', None),
-                'rrid': getattr(org, 'rrid', None)
+                'rrid': getattr(org, 'rrid', None),
+                **(_rrid_cache.get(org.rrid) or {} if org.rrid else {})
             } for org in data.publication_organizations
         ]
 
@@ -3203,8 +3330,8 @@ def create_version():
         publication_poster_url = None
         if publication_poster:
             poster_filename = publication_poster.filename
-            publication_poster.save(f'uploads/{poster_filename}')
-            base_url = 'https://docid.africapidalliance.org'
+            publication_poster.save(f'{Config.UPLOADS_DIRECTORY}/{poster_filename}')
+            base_url = Config.APPLICATION_BASE_URL.rstrip('/')
             publication_poster_url = f'{base_url}/uploads/{poster_filename}'
 
         # --- Create the versioned publication record ---
@@ -3251,20 +3378,25 @@ def create_version():
             generated_identifier = request.form.get(f'filesPublications[{index}][generated_identifier]')
             file = request.files.get(f'filesPublications_{index}_file')
 
+            video_url = request.form.get(f'filesPublications[{index}][video_url]', '').strip()
             file_url = ''
+            file_name = ''
             if file:
-                filename = file.filename
-                file.save(f'uploads/{filename}')
-                base_url = 'https://docid.africapidalliance.org'
-                file_url = f'{base_url}/uploads/{filename}'
+                file_name = file.filename
+                file.save(f'{Config.UPLOADS_DIRECTORY}/{file_name}')
+                base_url = Config.APPLICATION_BASE_URL.rstrip('/')
+                file_url = f'{base_url}/uploads/{file_name}'
+            elif video_url:
+                file_url = video_url
+                file_name = 'external_video'
 
             pub_file = PublicationFiles(
                 publication_id=publication_id,
                 title=file_title,
                 description=file_description or '',
                 publication_type_id=int(publication_type) if publication_type else 1,
-                file_name=file.filename if file else '',
-                file_type=file_type or '',
+                file_name=file_name,
+                file_type='video/external' if video_url and not file else (file_type or ''),
                 file_url=file_url,
                 identifier=identifier or '',
                 generated_identifier=generated_identifier or ''
@@ -3287,13 +3419,16 @@ def create_version():
             doc_generated_identifier = request.form.get(f'filesDocuments[{index}][generated_identifier]')
             doc_rrid = (request.form.get(f'filesDocuments[{index}][rrid]') or '').strip() or None
             doc_file = request.files.get(f'filesDocuments_{index}_file')
+            doc_video_url = request.form.get(f'filesDocuments[{index}][video_url]', '').strip()
 
             doc_file_url = ''
             if doc_file:
                 doc_filename = doc_file.filename
-                doc_file.save(f'uploads/{doc_filename}')
-                base_url = 'https://docid.africapidalliance.org'
+                doc_file.save(f'{Config.UPLOADS_DIRECTORY}/{doc_filename}')
+                base_url = Config.APPLICATION_BASE_URL.rstrip('/')
                 doc_file_url = f'{base_url}/uploads/{doc_filename}'
+            elif doc_video_url:
+                doc_file_url = doc_video_url
 
             pub_doc = PublicationDocuments(
                 publication_id=publication_id,

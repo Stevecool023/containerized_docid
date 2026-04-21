@@ -82,6 +82,9 @@ const ListDocIds = () => {
   const searchTimeout = useRef(null);
   const debouncedSearchQuery = useRef('');
   const [userAccountType, setUserAccountType] = useState('');
+  const searchInputRef = useRef(null);
+  const maintainFocusRef = useRef(false);
+  const isStateInitialized = useRef(false);
 
   // Wait for Redux Persist to rehydrate before checking authentication
   useEffect(() => {
@@ -115,6 +118,35 @@ const ListDocIds = () => {
       router.push('/login');
     }
   }, [isAuthenticated, isRehydrated, router]);
+
+  // Initialize state from URL parameters on mount
+  useEffect(() => {
+    if (!isStateInitialized.current) {
+      const urlSearchQuery = searchParams.get('search') || '';
+      const urlSearchField = searchParams.get('searchField') || 'all';
+      const urlAccountType = searchParams.get('accountType') || '';
+      const urlResourceTypes = searchParams.get('resourceTypes');
+      const urlPage = searchParams.get('page');
+
+      if (urlSearchQuery) setSearchQuery(urlSearchQuery);
+      if (urlSearchField) setSearchField(urlSearchField);
+      if (urlAccountType) setAccountTypeFilter(urlAccountType);
+      if (urlResourceTypes) {
+        try {
+          const types = JSON.parse(decodeURIComponent(urlResourceTypes));
+          setSelectedTypes(types);
+        } catch (e) {
+          console.error('Error parsing resource types from URL:', e);
+        }
+      }
+      if (urlPage) {
+        setPagination(prev => ({ ...prev, page: parseInt(urlPage, 10) }));
+      }
+
+      debouncedSearchQuery.current = urlSearchQuery;
+      isStateInitialized.current = true;
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     // Check if we have a success parameter in the URL and if we came from assign-docid page
@@ -158,6 +190,10 @@ const ListDocIds = () => {
   const fetchPublications = useCallback(async (page = 1) => {
     try {
       setIsLoading(true);
+      
+      // Update pagination state with current page
+      setPagination(prev => ({ ...prev, page }));
+      
       const params = new URLSearchParams();
       params.append('page', page);
       params.append('page_size', pagination.page_size);
@@ -224,12 +260,13 @@ const ListDocIds = () => {
 
   // Effect for initial load and when filter dependencies change
   useEffect(() => {
-    if (resourceTypesLoaded) {
-      fetchPublications(1);
+    if (resourceTypesLoaded && isStateInitialized.current) {
+      fetchPublications(pagination.page);
     }
   }, [fetchPublications, resourceTypesLoaded]);
 
-  // Debounced search: trigger API call after 300ms of typing inactivity
+  // Debounced search: fire only when query is empty (clear) or at least 4 chars,
+  // and only after 500ms of typing inactivity to reduce unnecessary requests.
   const isInitialMount = useRef(true);
   const fetchPublicationsRef = useRef(fetchPublications);
   fetchPublicationsRef.current = fetchPublications;
@@ -243,12 +280,17 @@ const ListDocIds = () => {
     if (searchTimeout.current) {
       clearTimeout(searchTimeout.current);
     }
+    const trimmedQuery = searchQuery.trim();
+    // Only search when field is cleared or has at least 4 characters
+    if (trimmedQuery.length > 0 && trimmedQuery.length < 4) {
+      return;
+    }
     searchTimeout.current = setTimeout(() => {
-      debouncedSearchQuery.current = searchQuery.trim();
+      debouncedSearchQuery.current = trimmedQuery;
       if (resourceTypesLoaded) {
         fetchPublicationsRef.current(1);
       }
-    }, 300);
+    }, 500);
     return () => {
       if (searchTimeout.current) {
         clearTimeout(searchTimeout.current);
@@ -256,9 +298,51 @@ const ListDocIds = () => {
     };
   }, [searchQuery, resourceTypesLoaded]);
 
+  // Restore focus after state updates if user was typing
+  useEffect(() => {
+    if (maintainFocusRef.current && searchInputRef.current && document.activeElement !== searchInputRef.current) {
+      searchInputRef.current.focus();
+      maintainFocusRef.current = false;
+    }
+  }, [publications]);
+
+  // Update URL with current filter state
+  const updateURL = useCallback((params) => {
+    if (!isStateInitialized.current) return;
+
+    const urlParams = new URLSearchParams();
+    
+    if (params.search) urlParams.set('search', params.search);
+    if (params.searchField && params.searchField !== 'all') urlParams.set('searchField', params.searchField);
+    if (params.accountType) urlParams.set('accountType', params.accountType);
+    if (params.resourceTypes && params.resourceTypes.length > 0) {
+      urlParams.set('resourceTypes', encodeURIComponent(JSON.stringify(params.resourceTypes)));
+    }
+    if (params.page && params.page > 1) urlParams.set('page', params.page.toString());
+
+    const queryString = urlParams.toString();
+    const newUrl = queryString ? `/list-docids?${queryString}` : '/list-docids';
+    
+    window.history.replaceState({}, '', newUrl);
+  }, []);
+
+  // Sync URL when filters change
+  useEffect(() => {
+    if (isStateInitialized.current) {
+      updateURL({
+        search: searchQuery,
+        searchField,
+        accountType: accountTypeFilter,
+        resourceTypes: selectedTypes,
+        page: pagination.page
+      });
+    }
+  }, [searchQuery, searchField, accountTypeFilter, selectedTypes, pagination.page, updateURL]);
+
   // Update search handler
   const handleSearchChange = (event) => {
     const value = event.target.value;
+    maintainFocusRef.current = true;
     setSearchQuery(value);
   };
 
@@ -371,7 +455,7 @@ const ListDocIds = () => {
 
   const handleAddDocument = async (document) => {
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/docids`, {
+      const response = await fetch('/api/publications/docid', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -545,6 +629,7 @@ const ListDocIds = () => {
                   value={searchQuery}
                   onChange={handleSearchChange}
                   disabled={isLoading}
+                  inputRef={searchInputRef}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -681,10 +766,10 @@ const ListDocIds = () => {
               <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
                 {t('docid.filter_by_account_type')}:
               </Typography>
-              {['', 'Individual', 'Institution'].map((filterValue) => {
+              {['', 'Individual', 'Institutional'].map((filterValue) => {
                 const label = filterValue === '' ? t('docid.all') :
                   filterValue === 'Individual' ? `${t('docid.individual')} (${accountTypeCounts['Individual'] || 0})` :
-                  `${t('docid.institutional')} (${accountTypeCounts['Institution'] || 0})`;
+                  `${t('docid.institutional')} (${accountTypeCounts['Institutional'] || 0})`;
                 const isActive = accountTypeFilter === filterValue;
                 return (
                   <Chip

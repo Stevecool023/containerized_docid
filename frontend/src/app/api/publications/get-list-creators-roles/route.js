@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { BACKEND_API_URL } from '@/lib/backendUrl';
 
 export async function GET() {
   try {
-    const response = await fetch(`${BACKEND_API_URL}/publications/get-list-creators-roles`, {
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
+    const response = await fetch(`${baseUrl}/publications/get-list-creators-roles`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

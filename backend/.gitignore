@@ -35,7 +35,8 @@ instance/
 .vscode/
 .history/
 
-# Environments (committed: .env — use .env.local for machine-only overrides)
+# Environments
+.env
 .env.local
 .env.*.local
 .venv

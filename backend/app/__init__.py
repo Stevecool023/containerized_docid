@@ -44,6 +44,18 @@ def create_app():
 
     # Load configurations from config.py
     app.config.from_object(Config)
+    os.makedirs(app.config["UPLOADS_DIRECTORY"], exist_ok=True)
+
+    # Hard-fail on unsafe production URL defaults to prevent broken upload links.
+    app_base_url = (app.config.get("APPLICATION_BASE_URL") or "").strip().lower()
+    if os.getenv("FLASK_ENV", "development") == "production" and (
+        not app_base_url
+        or "localhost" in app_base_url
+        or "127.0.0.1" in app_base_url
+    ):
+        raise RuntimeError(
+            "APPLICATION_BASE_URL must be set to a public domain in production."
+        )
 
     # JWT Configuration from environment
     from datetime import timedelta
@@ -55,16 +67,8 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
     mail.init_app(app)
-    # Configure CORS to allow local development
-    CORS(app, origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "https://docid.africapidalliance.org",
-        "https://docid-core.africapidalliance.org",
-        "https://docid-demo.africapidalliance.org",
-    ])
+    cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    CORS(app, origins=[origin.strip() for origin in cors_origins.split(",") if origin.strip()])
     jwt.init_app(app)
     limiter.init_app(app)
     
@@ -112,6 +116,7 @@ def create_app():
     from app.routes.ojs import ojs_bp
     from app.routes.rrid import rrid_bp
     from app.routes.national_id import national_id_bp
+    from app.routes.tenants import tenants_bp
 
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(datacite_bp, url_prefix='/api/v1/datacite')
@@ -140,6 +145,7 @@ def create_app():
     app.register_blueprint(ojs_bp)  # OJS integration
     app.register_blueprint(rrid_bp, url_prefix='/api/v1/rrid')
     app.register_blueprint(national_id_bp, url_prefix='/api/v1/national-id')
+    app.register_blueprint(tenants_bp)  # url_prefix is set on the blueprint itself
 
     # Add root-level DocID route
     from app.routes.docid_root import setup_docid_root_route
